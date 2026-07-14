@@ -550,7 +550,7 @@ function renderActions() {
         <td>${escapeHtml(formatPeople(action.people || action.owner))}</td>
         <td>${escapeHtml(formatThemes(action.themes || action.theme))}</td>
         <td><span class="pill priority-${action.priority}">${escapeHtml(action.priority)}</span></td>
-        <td>${formatDate(action.dueDate)}</td>
+        <td><span class="due-date ${dueDateClass(action.dueDate)}">${formatDate(action.dueDate)}</span></td>
         <td>
           <select aria-label="Status for ${escapeHtml(action.title)}" onchange="updateStatus('${action.id}', this.value)">
             ${["Open", "In progress", "Blocked", "Done"].map((status) => `<option ${status === action.status ? "selected" : ""}>${status}</option>`).join("")}
@@ -599,7 +599,7 @@ function renderMeetingActionDrafts() {
             <span>${escapeHtml(formatPeople(action.people || action.owner))}</span>
             <span>${escapeHtml(action.priority)}</span>
             <span>${escapeHtml(action.status)}</span>
-            <span>Due ${formatDate(action.dueDate)}</span>
+            <span class="due-date ${dueDateClass(action.dueDate)}">Due ${formatDate(action.dueDate)}</span>
           </div>
         </div>
         <div class="row-actions">
@@ -669,7 +669,7 @@ function actionCard(action) {
       <div class="meta-row">
         <span>${escapeHtml(formatPeople(action.people || action.owner))}</span>
         <span>${escapeHtml(formatThemes(action.themes || action.theme))}</span>
-        <span>Due ${formatDate(action.dueDate)}</span>
+        <span class="due-date ${dueDateClass(action.dueDate)}">Due ${formatDate(action.dueDate)}</span>
         <span class="pill status-${action.status.replaceAll(" ", "-")}">${escapeHtml(action.status)}</span>
       </div>
       <div class="row-actions">
@@ -1089,6 +1089,16 @@ function emptyState(text) {
 function formatDate(value) {
   if (!value) return "";
   return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+function dueDateClass(value) {
+  if (!value) return "due-future";
+  const viewedDate = new Date(`${isoToday}T00:00:00`);
+  const dueDate = new Date(`${value}T00:00:00`);
+  const dayDifference = Math.floor((dueDate - viewedDate) / 86400000);
+  if (dayDifference < 0) return "due-overdue";
+  if (dayDifference <= 2) return "due-soon";
+  return "due-future";
 }
 
 function formatShortDate(value) {

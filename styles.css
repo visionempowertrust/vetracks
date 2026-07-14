@@ -412,6 +412,30 @@ select[multiple] option {
   color: #3d4f63;
 }
 
+.due-date {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 750;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.due-overdue {
+  background: #ffe7e2;
+  color: var(--red);
+}
+
+.due-soon {
+  background: #fff1d6;
+  color: var(--amber);
+}
+
+.due-future {
+  background: #e7f7ec;
+  color: var(--green);
+}
+
 .table-wrap {
   background: var(--white);
   border: 1px solid var(--line);
