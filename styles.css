@@ -95,9 +95,9 @@ button:hover,
 }
 
 .brand {
-  display: flex;
-  gap: 14px;
-  align-items: center;
+  display: grid;
+  gap: 10px;
+  align-items: start;
   margin-bottom: 28px;
 }
 
@@ -105,10 +105,11 @@ button:hover,
   background: var(--white);
   border: 1px solid var(--line);
   border-radius: 8px;
-  height: 54px;
+  height: auto;
+  max-height: 72px;
   object-fit: contain;
-  padding: 5px;
-  width: 54px;
+  padding: 6px;
+  width: min(100%, 240px);
 }
 
 .brand h1,
