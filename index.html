@@ -21,7 +21,7 @@
           <button class="nav-tab active" data-view="dashboard" type="button">Dashboard</button>
           <button class="nav-tab" data-view="meetings" type="button">Meetings</button>
           <button class="nav-tab" data-view="actions" type="button">Actions</button>
-          <button class="nav-tab" data-view="owners" type="button">Owners</button>
+          <button class="nav-tab" data-view="owners" type="button">People</button>
           <button class="nav-tab" data-view="themes" type="button">Themes</button>
         </nav>
 
@@ -29,7 +29,7 @@
           <label for="themeFilter">Theme</label>
           <select id="themeFilter"></select>
 
-          <label for="ownerFilter">Owner</label>
+          <label for="ownerFilter">Person</label>
           <select id="ownerFilter"></select>
 
           <label for="statusFilter">Status</label>
@@ -103,8 +103,8 @@
               <thead>
                 <tr>
                   <th>Action</th>
-                  <th>Owner</th>
-                  <th>Theme</th>
+                  <th>Person</th>
+                  <th>Themes</th>
                   <th>Priority</th>
                   <th>Due</th>
                   <th>Status</th>
@@ -129,10 +129,10 @@
 
         <section id="ownersView" class="view">
           <div class="section-heading">
-            <h3>Owners</h3>
+            <h3>People</h3>
             <form id="ownerForm" class="inline-form owner-form">
               <input id="ownerId" type="hidden">
-              <input id="ownerName" type="text" placeholder="Owner name" required>
+              <input id="ownerName" type="text" placeholder="Person name" required>
               <input id="ownerRole" type="text" placeholder="Role or team">
               <input id="ownerEmail" type="email" placeholder="Email">
               <button id="saveOwnerButton" type="submit">Add</button>
@@ -143,7 +143,7 @@
             <table>
               <thead>
                 <tr>
-                  <th>Owner</th>
+                  <th>Person</th>
                   <th>Role / Team</th>
                   <th>Email</th>
                   <th>Open Actions</th>
@@ -181,8 +181,8 @@
             <input id="meetingActionId" type="hidden">
             <label>Action item<input id="meetingActionTitle" type="text"></label>
             <div class="form-grid">
-              <label>Owner<select id="meetingActionOwner"></select></label>
-              <label>Theme<select id="meetingActionTheme"></select></label>
+              <label>People<select id="meetingActionOwner" multiple></select></label>
+              <label>Themes<select id="meetingActionTheme" multiple></select></label>
               <label>Priority
                 <select id="meetingActionPriority">
                   <option>Critical</option>
@@ -224,8 +224,8 @@
         <input id="actionId" type="hidden">
         <label>Action item<input id="actionTitle" type="text" required></label>
         <div class="form-grid">
-          <label>Owner<select id="actionOwner" required></select></label>
-          <label>Theme<select id="actionTheme" required></select></label>
+          <label>People<select id="actionOwner" multiple required></select></label>
+          <label>Themes<select id="actionTheme" multiple required></select></label>
           <label>Priority
             <select id="actionPriority">
               <option>Critical</option>

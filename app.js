@@ -25,9 +25,9 @@ const defaultData = {
   actions: [
     {
       id: crypto.randomUUID(),
-      title: "Create owner-wise escalation list for delayed milestones",
-      owner: "Operations",
-      theme: "Program Delivery",
+      title: "Create person-wise escalation list for delayed milestones",
+      people: ["Operations"],
+      themes: ["Program Delivery"],
       priority: "High",
       status: "In progress",
       dueDate: addDays(isoToday, 3),
@@ -39,8 +39,8 @@ const defaultData = {
     {
       id: crypto.randomUUID(),
       title: "Confirm budget approval route for upcoming activities",
-      owner: "Finance",
-      theme: "Finance",
+      people: ["Finance"],
+      themes: ["Finance"],
       priority: "Critical",
       status: "Open",
       dueDate: addDays(isoToday, 1),
@@ -107,7 +107,7 @@ document.querySelector("#clearData").addEventListener("click", clearData);
 document.querySelector("#saveMeetingAction").addEventListener("click", saveMeetingActionDraft);
 document.querySelector("#cancelMeetingActionEdit").addEventListener("click", resetMeetingActionForm);
 document.querySelector("#meetingTheme").addEventListener("change", () => {
-  document.querySelector("#meetingActionTheme").value = document.querySelector("#meetingTheme").value;
+  setMultiSelectValues(document.querySelector("#meetingActionTheme"), [document.querySelector("#meetingTheme").value]);
 });
 
 ["change"].forEach((eventName) => {
@@ -148,9 +148,14 @@ function normalizeState(data) {
   };
   const participantOwners = normalized.meetings.flatMap((meeting) => normalizeParticipants(meeting.participants));
   const typedOwners = [
-    ...normalized.actions.map((action) => action.owner).filter(Boolean),
+    ...normalized.actions.flatMap((action) => normalizePeople(action.people || action.owner)),
     ...participantOwners
   ];
+  normalized.actions = normalized.actions.map((action) => ({
+    ...action,
+    people: normalizePeople(action.people || action.owner),
+    themes: normalizeThemes(action.themes || action.theme)
+  }));
   const ownerNames = new Set(normalized.owners.map((owner) => owner.name).filter(Boolean));
   if (!hasOwnerRecords) {
     typedOwners.forEach((name) => {
@@ -189,18 +194,30 @@ function setSyncStatus(message, isError = false) {
 }
 
 async function loadState() {
-  const [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult] = await Promise.all([
+  const [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult] = await Promise.all([
     db.from("raahat_themes").select("*").order("name"),
-    db.from("raahat_owners").select("*").order("name"),
+    db.from("raahat_people").select("*").order("name"),
     db.from("raahat_meetings").select("*").order("date", { ascending: false }),
     db.from("raahat_meeting_participants").select("*"),
-    db.from("raahat_actions").select("*").order("due_date", { ascending: true })
+    db.from("raahat_actions").select("*").order("due_date", { ascending: true }),
+    db.from("raahat_action_people").select("*"),
+    db.from("raahat_action_themes").select("*")
   ]);
-  [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult].forEach(throwIfSupabaseError);
+  [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult].forEach(throwIfSupabaseError);
 
   const participantsByMeeting = participantsResult.data.reduce((map, row) => {
     if (!map[row.meeting_id]) map[row.meeting_id] = [];
-    map[row.meeting_id].push(row.owner_name);
+    map[row.meeting_id].push(row.person_name);
+    return map;
+  }, {});
+  const peopleByAction = actionPeopleResult.data.reduce((map, row) => {
+    if (!map[row.action_id]) map[row.action_id] = [];
+    map[row.action_id].push(row.person_name);
+    return map;
+  }, {});
+  const themesByAction = actionThemesResult.data.reduce((map, row) => {
+    if (!map[row.action_id]) map[row.action_id] = [];
+    map[row.action_id].push(row.theme_name);
     return map;
   }, {});
 
@@ -223,8 +240,8 @@ async function loadState() {
     actions: actionsResult.data.map((action) => ({
       id: action.id,
       title: action.title,
-      owner: action.owner_name,
-      theme: action.theme_name,
+      people: peopleByAction[action.id] || [],
+      themes: themesByAction[action.id] || [],
       priority: action.priority,
       status: action.status,
       dueDate: action.due_date,
@@ -258,7 +275,7 @@ async function saveThemesToDatabase(themes) {
 
 async function saveOwnersToDatabase(owners) {
   if (!owners.length) return;
-  throwIfSupabaseError(await db.from("raahat_owners").upsert(
+  throwIfSupabaseError(await db.from("raahat_people").upsert(
     owners.map((owner) => ({
       id: owner.id,
       name: owner.name,
@@ -285,27 +302,48 @@ async function saveMeetingsToDatabase(meetings) {
 
 async function saveActionsToDatabase(actions) {
   if (!actions.length) return;
+  const actionIds = actions.map((action) => action.id);
+  throwIfSupabaseError(await db.from("raahat_action_people").delete().in("action_id", actionIds));
+  throwIfSupabaseError(await db.from("raahat_action_themes").delete().in("action_id", actionIds));
   throwIfSupabaseError(await db.from("raahat_actions").upsert(
     actions.map(actionToRow),
     { onConflict: "id" }
   ));
+  await saveActionPeopleToDatabase(actions);
+  await saveActionThemesToDatabase(actions);
 }
 
 async function saveParticipantsToDatabase(meetings) {
-  const rows = meetings.flatMap((meeting) => normalizeParticipants(meeting.participants).map((ownerName) => ({
+  const rows = meetings.flatMap((meeting) => normalizeParticipants(meeting.participants).map((personName) => ({
     meeting_id: meeting.id,
-    owner_name: ownerName
+    person_name: personName
   })));
   if (!rows.length) return;
-  throwIfSupabaseError(await db.from("raahat_meeting_participants").upsert(rows, { onConflict: "meeting_id,owner_name" }));
+  throwIfSupabaseError(await db.from("raahat_meeting_participants").upsert(rows, { onConflict: "meeting_id,person_name" }));
+}
+
+async function saveActionPeopleToDatabase(actions) {
+  const rows = actions.flatMap((action) => normalizePeople(action.people || action.owner).map((personName) => ({
+    action_id: action.id,
+    person_name: personName
+  })));
+  if (!rows.length) return;
+  throwIfSupabaseError(await db.from("raahat_action_people").upsert(rows, { onConflict: "action_id,person_name" }));
+}
+
+async function saveActionThemesToDatabase(actions) {
+  const rows = actions.flatMap((action) => normalizeThemes(action.themes || action.theme).map((themeName) => ({
+    action_id: action.id,
+    theme_name: themeName
+  })));
+  if (!rows.length) return;
+  throwIfSupabaseError(await db.from("raahat_action_themes").upsert(rows, { onConflict: "action_id,theme_name" }));
 }
 
 function actionToRow(action) {
   return {
     id: action.id,
     title: action.title,
-    owner_name: action.owner,
-    theme_name: action.theme,
     priority: action.priority,
     status: action.status,
     due_date: action.dueDate,
@@ -340,7 +378,7 @@ function renderFilters() {
   const owners = state.owners.map((owner) => owner.name).sort();
 
   els.themeFilter.innerHTML = optionHtml(["all", ...state.themes], currentTheme, "All themes");
-  els.ownerFilter.innerHTML = optionHtml(["all", ...owners], currentOwner, "All owners");
+  els.ownerFilter.innerHTML = optionHtml(["all", ...owners], currentOwner, "All people");
   fillThemeSelects();
   fillOwnerSelect();
   fillMeetingSelect();
@@ -380,8 +418,8 @@ function filteredActions() {
   const owner = els.ownerFilter.value || "all";
   const status = els.statusFilter.value || "all";
   return state.actions.filter((action) => {
-    return (theme === "all" || action.theme === theme)
-      && (owner === "all" || action.owner === owner)
+    return (theme === "all" || normalizeThemes(action.themes || action.theme).includes(theme))
+      && (owner === "all" || normalizePeople(action.people || action.owner).includes(owner))
       && (status === "all" || action.status === status);
   });
 }
@@ -466,8 +504,8 @@ function renderActions() {
     ? actions.map((action) => `
       <tr>
         <td><strong>${escapeHtml(action.title)}</strong><div class="meta-row">${escapeHtml(action.notes || "")}</div></td>
-        <td>${escapeHtml(action.owner)}</td>
-        <td>${escapeHtml(action.theme)}</td>
+        <td>${escapeHtml(formatPeople(action.people || action.owner))}</td>
+        <td>${escapeHtml(formatThemes(action.themes || action.theme))}</td>
         <td><span class="pill priority-${action.priority}">${escapeHtml(action.priority)}</span></td>
         <td>${formatDate(action.dueDate)}</td>
         <td>
@@ -488,7 +526,7 @@ function renderActions() {
 function renderOwners() {
   els.ownerTable.innerHTML = state.owners.length
     ? state.owners.map((owner) => {
-      const openActions = state.actions.filter((action) => action.owner === owner.name && action.status !== "Done").length;
+      const openActions = state.actions.filter((action) => normalizePeople(action.people || action.owner).includes(owner.name) && action.status !== "Done").length;
       return `
         <tr>
           <td><strong>${escapeHtml(owner.name)}</strong></td>
@@ -504,7 +542,7 @@ function renderOwners() {
         </tr>
       `;
     }).join("")
-    : `<tr><td colspan="5">${emptyState("No owners yet.")}</td></tr>`;
+    : `<tr><td colspan="5">${emptyState("No people yet.")}</td></tr>`;
 }
 
 function renderMeetingActionDrafts() {
@@ -514,7 +552,7 @@ function renderMeetingActionDrafts() {
         <div>
           <strong>${escapeHtml(action.title)}</strong>
           <div class="meta-row">
-            <span>${escapeHtml(action.owner)}</span>
+            <span>${escapeHtml(formatPeople(action.people || action.owner))}</span>
             <span>${escapeHtml(action.priority)}</span>
             <span>${escapeHtml(action.status)}</span>
             <span>Due ${formatDate(action.dueDate)}</span>
@@ -531,7 +569,7 @@ function renderMeetingActionDrafts() {
 
 function renderThemes() {
   els.themeBoard.innerHTML = state.themes.map((theme) => {
-    const actions = state.actions.filter((action) => action.theme === theme);
+    const actions = state.actions.filter((action) => normalizeThemes(action.themes || action.theme).includes(theme));
     const done = actions.filter((action) => action.status === "Done").length;
     const overdue = actions.filter((action) => action.status !== "Done" && action.dueDate < isoToday).length;
     return `
@@ -555,8 +593,8 @@ function actionCard(action) {
         <span class="pill priority-${action.priority}">${escapeHtml(action.priority)}</span>
       </div>
       <div class="meta-row">
-        <span>${escapeHtml(action.owner)}</span>
-        <span>${escapeHtml(action.theme)}</span>
+        <span>${escapeHtml(formatPeople(action.people || action.owner))}</span>
+        <span>${escapeHtml(formatThemes(action.themes || action.theme))}</span>
         <span>Due ${formatDate(action.dueDate)}</span>
         <span class="pill status-${action.status.replaceAll(" ", "-")}">${escapeHtml(action.status)}</span>
       </div>
@@ -571,7 +609,8 @@ function actionCard(action) {
 function setView(viewName) {
   Object.entries(els.views).forEach(([name, view]) => view.classList.toggle("active-view", name === viewName));
   els.navTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === viewName));
-  els.viewTitle.textContent = viewName.charAt(0).toUpperCase() + viewName.slice(1);
+  const titles = { owners: "People" };
+  els.viewTitle.textContent = titles[viewName] || viewName.charAt(0).toUpperCase() + viewName.slice(1);
 }
 
 function openMeetingDialog(id = "") {
@@ -608,8 +647,8 @@ function openActionDialog(id = "", meetingId = "") {
   els.actionDialogTitle.textContent = action ? "Edit action" : "New action";
   document.querySelector("#actionId").value = action?.id || "";
   document.querySelector("#actionTitle").value = action?.title || "";
-  document.querySelector("#actionOwner").value = action?.owner || state.owners[0].name;
-  document.querySelector("#actionTheme").value = action?.theme || meeting?.theme || state.themes[0];
+  setMultiSelectValues(document.querySelector("#actionOwner"), normalizePeople(action?.people || action?.owner || state.owners[0].name));
+  setMultiSelectValues(document.querySelector("#actionTheme"), normalizeThemes(action?.themes || action?.theme || meeting?.theme || state.themes[0]));
   document.querySelector("#actionPriority").value = action?.priority || "Medium";
   document.querySelector("#actionStatus").value = action?.status || "Open";
   document.querySelector("#actionDueDate").value = action?.dueDate || addDays(isoToday, 7);
@@ -654,10 +693,11 @@ async function saveMeeting(event) {
 
 function saveMeetingActionDraft() {
   const title = document.querySelector("#meetingActionTitle").value.trim();
-  const owner = document.querySelector("#meetingActionOwner").value;
+  const people = getMultiSelectValues(document.querySelector("#meetingActionOwner"));
+  const themes = getMultiSelectValues(document.querySelector("#meetingActionTheme"));
   const dueDate = document.querySelector("#meetingActionDueDate").value;
-  if (!title || !owner || !dueDate) {
-    alert("Action item, owner, and due date are required.");
+  if (!title || !people.length || !themes.length || !dueDate) {
+    alert("Action item, people, themes, and due date are required.");
     return;
   }
   const id = document.querySelector("#meetingActionId").value || crypto.randomUUID();
@@ -666,8 +706,8 @@ function saveMeetingActionDraft() {
   const action = {
     id,
     title,
-    owner,
-    theme: document.querySelector("#meetingActionTheme").value,
+    people,
+    themes,
     priority: document.querySelector("#meetingActionPriority").value,
     status,
     dueDate,
@@ -686,8 +726,8 @@ function editMeetingActionDraft(id) {
   if (!action) return;
   document.querySelector("#meetingActionId").value = action.id;
   document.querySelector("#meetingActionTitle").value = action.title;
-  document.querySelector("#meetingActionOwner").value = action.owner;
-  document.querySelector("#meetingActionTheme").value = action.theme;
+  setMultiSelectValues(document.querySelector("#meetingActionOwner"), normalizePeople(action.people || action.owner));
+  setMultiSelectValues(document.querySelector("#meetingActionTheme"), normalizeThemes(action.themes || action.theme));
   document.querySelector("#meetingActionPriority").value = action.priority;
   document.querySelector("#meetingActionStatus").value = action.status;
   document.querySelector("#meetingActionDueDate").value = action.dueDate;
@@ -706,8 +746,8 @@ function deleteMeetingActionDraft(id) {
 function resetMeetingActionForm() {
   document.querySelector("#meetingActionId").value = "";
   document.querySelector("#meetingActionTitle").value = "";
-  document.querySelector("#meetingActionOwner").value = state.owners[0]?.name || "";
-  document.querySelector("#meetingActionTheme").value = document.querySelector("#meetingTheme").value || state.themes[0];
+  setMultiSelectValues(document.querySelector("#meetingActionOwner"), state.owners[0]?.name ? [state.owners[0].name] : []);
+  setMultiSelectValues(document.querySelector("#meetingActionTheme"), [document.querySelector("#meetingTheme").value || state.themes[0]].filter(Boolean));
   document.querySelector("#meetingActionPriority").value = "Medium";
   document.querySelector("#meetingActionStatus").value = "Open";
   document.querySelector("#meetingActionDueDate").value = addDays(isoToday, 7);
@@ -724,9 +764,27 @@ function normalizeParticipants(participants) {
   return [];
 }
 
+function normalizePeople(people) {
+  return normalizeParticipants(people);
+}
+
+function normalizeThemes(themes) {
+  return normalizeParticipants(themes);
+}
+
 function formatParticipants(participants) {
   const names = normalizeParticipants(participants);
   return names.length ? names.join(", ") : "No participants listed";
+}
+
+function formatPeople(people) {
+  const names = normalizePeople(people);
+  return names.length ? names.join(", ") : "No people selected";
+}
+
+function formatThemes(themes) {
+  const names = normalizeThemes(themes);
+  return names.length ? names.join(", ") : "No themes selected";
 }
 
 function getMultiSelectValues(select) {
@@ -745,11 +803,17 @@ async function saveAction(event) {
   const id = document.querySelector("#actionId").value || crypto.randomUUID();
   const existing = state.actions.find((action) => action.id === id);
   const status = document.querySelector("#actionStatus").value;
+  const people = getMultiSelectValues(document.querySelector("#actionOwner"));
+  const themes = getMultiSelectValues(document.querySelector("#actionTheme"));
+  if (!people.length || !themes.length) {
+    alert("Select at least one person and one theme.");
+    return;
+  }
   const action = {
     id,
     title: document.querySelector("#actionTitle").value.trim(),
-    owner: document.querySelector("#actionOwner").value.trim(),
-    theme: document.querySelector("#actionTheme").value,
+    people,
+    themes,
     priority: document.querySelector("#actionPriority").value,
     status,
     dueDate: document.querySelector("#actionDueDate").value,
@@ -777,22 +841,22 @@ async function saveOwner(event) {
   };
   const duplicate = state.owners.some((item) => item.id !== id && item.name.toLowerCase() === owner.name.toLowerCase());
   if (duplicate) {
-    alert("An owner with this name already exists.");
+    alert("A person with this name already exists.");
     return;
   }
   await runDatabaseChange(async () => {
-    throwIfSupabaseError(await db.from("raahat_owners").upsert({
+    throwIfSupabaseError(await db.from("raahat_people").upsert({
       id: owner.id,
       name: owner.name,
       role: owner.role || null,
       email: owner.email || null
     }, { onConflict: "id" }));
     if (previousName && previousName !== owner.name) {
-      throwIfSupabaseError(await db.from("raahat_actions").update({ owner_name: owner.name }).eq("owner_name", previousName));
-      throwIfSupabaseError(await db.from("raahat_meeting_participants").update({ owner_name: owner.name }).eq("owner_name", previousName));
+      throwIfSupabaseError(await db.from("raahat_action_people").update({ person_name: owner.name }).eq("person_name", previousName));
+      throwIfSupabaseError(await db.from("raahat_meeting_participants").update({ person_name: owner.name }).eq("person_name", previousName));
     }
     resetOwnerForm();
-  }, "Database: owner saved");
+  }, "Database: person saved");
 }
 
 function editOwner(id) {
@@ -810,16 +874,16 @@ function editOwner(id) {
 async function deleteOwner(id) {
   const owner = state.owners.find((item) => item.id === id);
   if (!owner) return;
-  const openActions = state.actions.filter((action) => action.owner === owner.name && action.status !== "Done").length;
+  const openActions = state.actions.filter((action) => normalizePeople(action.people || action.owner).includes(owner.name) && action.status !== "Done").length;
   if (openActions > 0) {
-    alert("Reassign or complete this owner's open actions before deleting.");
+    alert("Reassign or complete this person's open actions before deleting.");
     return;
   }
-  if (!confirm(`Delete owner "${owner.name}"? Completed action history will keep the owner name.`)) return;
+  if (!confirm(`Delete person "${owner.name}"? Completed action history will keep the person name.`)) return;
   await runDatabaseChange(async () => {
-    throwIfSupabaseError(await db.from("raahat_owners").delete().eq("id", id));
+    throwIfSupabaseError(await db.from("raahat_people").delete().eq("id", id));
     resetOwnerForm();
-  }, "Database: owner deleted");
+  }, "Database: person deleted");
 }
 
 function resetOwnerForm() {
@@ -889,7 +953,7 @@ function importData(event) {
 }
 
 async function clearData() {
-  if (!confirm("Clear all database records for meetings, actions, owners, and themes?")) return;
+  if (!confirm("Clear all database records for meetings, actions, people, and themes?")) return;
   setSyncStatus("Database: clearing");
   try {
     await clearDatabaseTables();
@@ -905,9 +969,11 @@ async function clearData() {
 
 async function clearDatabaseTables() {
   throwIfSupabaseError(await db.from("raahat_meeting_participants").delete().neq("meeting_id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_action_people").delete().neq("action_id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_action_themes").delete().neq("action_id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_meetings").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
-  throwIfSupabaseError(await db.from("raahat_owners").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_people").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_themes").delete().neq("name", ""));
 }
 
