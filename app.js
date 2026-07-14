@@ -5,6 +5,10 @@ const isoToday = today.toISOString().slice(0, 10);
 
 const defaultData = {
   themes: ["Program Delivery", "People & Staffing", "Finance", "Partnerships"],
+  owners: [
+    { id: crypto.randomUUID(), name: "Operations", role: "Execution", email: "" },
+    { id: crypto.randomUUID(), name: "Finance", role: "Approvals", email: "" }
+  ],
   meetings: [
     {
       id: crypto.randomUUID(),
@@ -54,6 +58,7 @@ const els = {
     dashboard: document.querySelector("#dashboardView"),
     meetings: document.querySelector("#meetingsView"),
     actions: document.querySelector("#actionsView"),
+    owners: document.querySelector("#ownersView"),
     themes: document.querySelector("#themesView")
   },
   metrics: document.querySelector("#metrics"),
@@ -62,6 +67,7 @@ const els = {
   trendChart: document.querySelector("#trendChart"),
   meetingList: document.querySelector("#meetingList"),
   actionTable: document.querySelector("#actionTable"),
+  ownerTable: document.querySelector("#ownerTable"),
   themeBoard: document.querySelector("#themeBoard"),
   themeFilter: document.querySelector("#themeFilter"),
   ownerFilter: document.querySelector("#ownerFilter"),
@@ -72,6 +78,7 @@ const els = {
   actionDialog: document.querySelector("#actionDialog"),
   actionForm: document.querySelector("#actionForm"),
   actionDialogTitle: document.querySelector("#actionDialogTitle"),
+  ownerForm: document.querySelector("#ownerForm"),
   themeForm: document.querySelector("#themeForm"),
   importData: document.querySelector("#importData")
 };
@@ -99,8 +106,10 @@ document.querySelector("#clearData").addEventListener("click", clearData);
 
 els.meetingForm.addEventListener("submit", saveMeeting);
 els.actionForm.addEventListener("submit", saveAction);
+els.ownerForm.addEventListener("submit", saveOwner);
 els.themeForm.addEventListener("submit", saveTheme);
 els.importData.addEventListener("change", importData);
+document.querySelector("#cancelOwnerEdit").addEventListener("click", resetOwnerForm);
 
 render();
 
@@ -108,10 +117,37 @@ function loadState() {
   const saved = localStorage.getItem(storageKey);
   if (!saved) return structuredClone(defaultData);
   try {
-    return JSON.parse(saved);
+    return normalizeState(JSON.parse(saved));
   } catch {
     return structuredClone(defaultData);
   }
+}
+
+function normalizeState(data) {
+  const hasOwnerRecords = Array.isArray(data.owners);
+  const normalized = {
+    themes: Array.isArray(data.themes) ? data.themes : structuredClone(defaultData.themes),
+    owners: hasOwnerRecords ? data.owners : [],
+    meetings: Array.isArray(data.meetings) ? data.meetings : [],
+    actions: Array.isArray(data.actions) ? data.actions : []
+  };
+  const typedOwners = normalized.actions.map((action) => action.owner).filter(Boolean);
+  const ownerNames = new Set(normalized.owners.map((owner) => owner.name).filter(Boolean));
+  if (!hasOwnerRecords) {
+    typedOwners.forEach((name) => {
+      if (!ownerNames.has(name)) {
+        normalized.owners.push({ id: crypto.randomUUID(), name, role: "", email: "" });
+        ownerNames.add(name);
+      }
+    });
+  }
+  normalized.owners = normalized.owners.map((owner) => ({
+    id: owner.id || crypto.randomUUID(),
+    name: owner.name || "",
+    role: owner.role || "",
+    email: owner.email || ""
+  })).filter((owner) => owner.name).sort((a, b) => a.name.localeCompare(b.name));
+  return normalized;
 }
 
 function persist() {
@@ -123,6 +159,7 @@ function render() {
   renderDashboard();
   renderMeetings();
   renderActions();
+  renderOwners();
   renderThemes();
   persist();
 }
@@ -130,11 +167,12 @@ function render() {
 function renderFilters() {
   const currentTheme = els.themeFilter.value || "all";
   const currentOwner = els.ownerFilter.value || "all";
-  const owners = [...new Set(state.actions.map((action) => action.owner).filter(Boolean))].sort();
+  const owners = state.owners.map((owner) => owner.name).sort();
 
   els.themeFilter.innerHTML = optionHtml(["all", ...state.themes], currentTheme, "All themes");
   els.ownerFilter.innerHTML = optionHtml(["all", ...owners], currentOwner, "All owners");
   fillThemeSelects();
+  fillOwnerSelect();
   fillMeetingSelect();
 }
 
@@ -149,6 +187,11 @@ function fillThemeSelects() {
   const options = state.themes.map((theme) => `<option>${escapeHtml(theme)}</option>`).join("");
   document.querySelector("#meetingTheme").innerHTML = options;
   document.querySelector("#actionTheme").innerHTML = options;
+}
+
+function fillOwnerSelect() {
+  const options = state.owners.map((owner) => `<option>${escapeHtml(owner.name)}</option>`).join("");
+  document.querySelector("#actionOwner").innerHTML = options;
 }
 
 function fillMeetingSelect() {
@@ -270,6 +313,28 @@ function renderActions() {
     : `<tr><td colspan="7">${emptyState("No actions for the selected filters.")}</td></tr>`;
 }
 
+function renderOwners() {
+  els.ownerTable.innerHTML = state.owners.length
+    ? state.owners.map((owner) => {
+      const openActions = state.actions.filter((action) => action.owner === owner.name && action.status !== "Done").length;
+      return `
+        <tr>
+          <td><strong>${escapeHtml(owner.name)}</strong></td>
+          <td>${escapeHtml(owner.role || "-")}</td>
+          <td>${owner.email ? `<a href="mailto:${escapeHtml(owner.email)}">${escapeHtml(owner.email)}</a>` : "-"}</td>
+          <td>${openActions}</td>
+          <td>
+            <div class="row-actions">
+              <button class="small-button secondary-button" type="button" onclick="editOwner('${owner.id}')">Edit</button>
+              <button class="small-button danger-button" type="button" onclick="deleteOwner('${owner.id}')">Delete</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("")
+    : `<tr><td colspan="5">${emptyState("No owners yet.")}</td></tr>`;
+}
+
 function renderThemes() {
   els.themeBoard.innerHTML = state.themes.map((theme) => {
     const actions = state.actions.filter((action) => action.theme === theme);
@@ -330,10 +395,15 @@ function openMeetingDialog(id = "") {
 function openActionDialog(id = "", meetingId = "") {
   const action = state.actions.find((item) => item.id === id);
   const meeting = state.meetings.find((item) => item.id === meetingId);
+  if (!state.owners.length) {
+    setView("owners");
+    document.querySelector("#ownerName").focus();
+    return;
+  }
   els.actionDialogTitle.textContent = action ? "Edit action" : "New action";
   document.querySelector("#actionId").value = action?.id || "";
   document.querySelector("#actionTitle").value = action?.title || "";
-  document.querySelector("#actionOwner").value = action?.owner || "";
+  document.querySelector("#actionOwner").value = action?.owner || state.owners[0].name;
   document.querySelector("#actionTheme").value = action?.theme || meeting?.theme || state.themes[0];
   document.querySelector("#actionPriority").value = action?.priority || "Medium";
   document.querySelector("#actionStatus").value = action?.status || "Open";
@@ -380,6 +450,63 @@ function saveAction(event) {
   state.actions = upsert(state.actions, action);
   els.actionDialog.close();
   render();
+}
+
+function saveOwner(event) {
+  event.preventDefault();
+  const id = document.querySelector("#ownerId").value || crypto.randomUUID();
+  const existing = state.owners.find((owner) => owner.id === id);
+  const previousName = existing?.name || "";
+  const owner = {
+    id,
+    name: document.querySelector("#ownerName").value.trim(),
+    role: document.querySelector("#ownerRole").value.trim(),
+    email: document.querySelector("#ownerEmail").value.trim()
+  };
+  const duplicate = state.owners.some((item) => item.id !== id && item.name.toLowerCase() === owner.name.toLowerCase());
+  if (duplicate) {
+    alert("An owner with this name already exists.");
+    return;
+  }
+  state.owners = upsert(state.owners, owner).sort((a, b) => a.name.localeCompare(b.name));
+  if (previousName && previousName !== owner.name) {
+    state.actions = state.actions.map((action) => action.owner === previousName ? { ...action, owner: owner.name } : action);
+  }
+  resetOwnerForm();
+  render();
+}
+
+function editOwner(id) {
+  const owner = state.owners.find((item) => item.id === id);
+  if (!owner) return;
+  document.querySelector("#ownerId").value = owner.id;
+  document.querySelector("#ownerName").value = owner.name;
+  document.querySelector("#ownerRole").value = owner.role;
+  document.querySelector("#ownerEmail").value = owner.email;
+  document.querySelector("#saveOwnerButton").textContent = "Save";
+  document.querySelector("#cancelOwnerEdit").classList.remove("hidden");
+  document.querySelector("#ownerName").focus();
+}
+
+function deleteOwner(id) {
+  const owner = state.owners.find((item) => item.id === id);
+  if (!owner) return;
+  const openActions = state.actions.filter((action) => action.owner === owner.name && action.status !== "Done").length;
+  if (openActions > 0) {
+    alert("Reassign or complete this owner's open actions before deleting.");
+    return;
+  }
+  if (!confirm(`Delete owner "${owner.name}"? Completed action history will keep the owner name.`)) return;
+  state.owners = state.owners.filter((item) => item.id !== id);
+  resetOwnerForm();
+  render();
+}
+
+function resetOwnerForm() {
+  els.ownerForm.reset();
+  document.querySelector("#ownerId").value = "";
+  document.querySelector("#saveOwnerButton").textContent = "Add";
+  document.querySelector("#cancelOwnerEdit").classList.add("hidden");
 }
 
 function saveTheme(event) {
@@ -434,7 +561,7 @@ function importData(event) {
       if (!Array.isArray(imported.themes) || !Array.isArray(imported.meetings) || !Array.isArray(imported.actions)) {
         throw new Error("Invalid data");
       }
-      state = imported;
+      state = normalizeState(imported);
       render();
     } catch {
       alert("This file does not look like Action Tracker data.");
@@ -445,7 +572,7 @@ function importData(event) {
 
 function clearData() {
   if (!confirm("Clear all locally stored meetings and actions?")) return;
-  state = { themes: ["Program Delivery"], meetings: [], actions: [] };
+  state = { themes: ["Program Delivery"], owners: [], meetings: [], actions: [] };
   render();
 }
 

@@ -220,6 +220,20 @@ textarea {
   gap: 10px;
 }
 
+.owner-form {
+  flex-wrap: wrap;
+}
+
+.owner-form input[type="text"],
+.owner-form input[type="email"] {
+  min-width: 180px;
+  width: 220px;
+}
+
+.hidden {
+  display: none;
+}
+
 .view {
   display: none;
 }

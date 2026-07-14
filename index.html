@@ -21,6 +21,7 @@
           <button class="nav-tab active" data-view="dashboard" type="button">Dashboard</button>
           <button class="nav-tab" data-view="meetings" type="button">Meetings</button>
           <button class="nav-tab" data-view="actions" type="button">Actions</button>
+          <button class="nav-tab" data-view="owners" type="button">Owners</button>
           <button class="nav-tab" data-view="themes" type="button">Themes</button>
         </nav>
 
@@ -124,6 +125,34 @@
           </div>
           <div id="themeBoard" class="theme-board"></div>
         </section>
+
+        <section id="ownersView" class="view">
+          <div class="section-heading">
+            <h3>Owners</h3>
+            <form id="ownerForm" class="inline-form owner-form">
+              <input id="ownerId" type="hidden">
+              <input id="ownerName" type="text" placeholder="Owner name" required>
+              <input id="ownerRole" type="text" placeholder="Role or team">
+              <input id="ownerEmail" type="email" placeholder="Email">
+              <button id="saveOwnerButton" type="submit">Add</button>
+              <button id="cancelOwnerEdit" class="secondary-button hidden" type="button">Cancel</button>
+            </form>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Owner</th>
+                  <th>Role / Team</th>
+                  <th>Email</th>
+                  <th>Open Actions</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ownerTable"></tbody>
+            </table>
+          </div>
+        </section>
       </main>
     </div>
 
@@ -157,7 +186,7 @@
         <input id="actionId" type="hidden">
         <label>Action item<input id="actionTitle" type="text" required></label>
         <div class="form-grid">
-          <label>Owner<input id="actionOwner" type="text" required></label>
+          <label>Owner<select id="actionOwner" required></select></label>
           <label>Theme<select id="actionTheme" required></select></label>
           <label>Priority
             <select id="actionPriority">
