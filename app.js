@@ -1,0 +1,484 @@
+const storageKey = "meeting-action-tracker:v1";
+
+const today = new Date();
+const isoToday = today.toISOString().slice(0, 10);
+
+const defaultData = {
+  themes: ["Program Delivery", "People & Staffing", "Finance", "Partnerships"],
+  meetings: [
+    {
+      id: crypto.randomUUID(),
+      title: "Weekly Leadership Review",
+      date: isoToday,
+      theme: "Program Delivery",
+      participants: "Meera, Operations, Program Leads",
+      mom: "Reviewed delayed milestones, partner dependencies, and decision points for the current month."
+    }
+  ],
+  actions: [
+    {
+      id: crypto.randomUUID(),
+      title: "Create owner-wise escalation list for delayed milestones",
+      owner: "Operations",
+      theme: "Program Delivery",
+      priority: "High",
+      status: "In progress",
+      dueDate: addDays(isoToday, 3),
+      meetingId: "",
+      notes: "Include dependencies and next review date.",
+      createdAt: isoToday,
+      completedAt: ""
+    },
+    {
+      id: crypto.randomUUID(),
+      title: "Confirm budget approval route for upcoming activities",
+      owner: "Finance",
+      theme: "Finance",
+      priority: "Critical",
+      status: "Open",
+      dueDate: addDays(isoToday, 1),
+      meetingId: "",
+      notes: "",
+      createdAt: isoToday,
+      completedAt: ""
+    }
+  ]
+};
+
+let state = loadState();
+
+const els = {
+  navTabs: document.querySelectorAll(".nav-tab"),
+  viewTitle: document.querySelector("#viewTitle"),
+  views: {
+    dashboard: document.querySelector("#dashboardView"),
+    meetings: document.querySelector("#meetingsView"),
+    actions: document.querySelector("#actionsView"),
+    themes: document.querySelector("#themesView")
+  },
+  metrics: document.querySelector("#metrics"),
+  priorityList: document.querySelector("#priorityList"),
+  priorityCount: document.querySelector("#priorityCount"),
+  trendChart: document.querySelector("#trendChart"),
+  meetingList: document.querySelector("#meetingList"),
+  actionTable: document.querySelector("#actionTable"),
+  themeBoard: document.querySelector("#themeBoard"),
+  themeFilter: document.querySelector("#themeFilter"),
+  ownerFilter: document.querySelector("#ownerFilter"),
+  statusFilter: document.querySelector("#statusFilter"),
+  meetingDialog: document.querySelector("#meetingDialog"),
+  meetingForm: document.querySelector("#meetingForm"),
+  meetingDialogTitle: document.querySelector("#meetingDialogTitle"),
+  actionDialog: document.querySelector("#actionDialog"),
+  actionForm: document.querySelector("#actionForm"),
+  actionDialogTitle: document.querySelector("#actionDialogTitle"),
+  themeForm: document.querySelector("#themeForm"),
+  importData: document.querySelector("#importData")
+};
+
+document.querySelectorAll("[data-close-dialog]").forEach((button) => {
+  button.addEventListener("click", () => button.closest("dialog").close());
+});
+
+els.navTabs.forEach((tab) => {
+  tab.addEventListener("click", () => setView(tab.dataset.view));
+});
+
+document.querySelector("#newMeetingButton").addEventListener("click", () => openMeetingDialog());
+document.querySelector("#addMeetingInline").addEventListener("click", () => openMeetingDialog());
+document.querySelector("#newActionButton").addEventListener("click", () => openActionDialog());
+document.querySelector("#addActionInline").addEventListener("click", () => openActionDialog());
+document.querySelector("#exportData").addEventListener("click", exportData);
+document.querySelector("#clearData").addEventListener("click", clearData);
+
+["change"].forEach((eventName) => {
+  els.themeFilter.addEventListener(eventName, render);
+  els.ownerFilter.addEventListener(eventName, render);
+  els.statusFilter.addEventListener(eventName, render);
+});
+
+els.meetingForm.addEventListener("submit", saveMeeting);
+els.actionForm.addEventListener("submit", saveAction);
+els.themeForm.addEventListener("submit", saveTheme);
+els.importData.addEventListener("change", importData);
+
+render();
+
+function loadState() {
+  const saved = localStorage.getItem(storageKey);
+  if (!saved) return structuredClone(defaultData);
+  try {
+    return JSON.parse(saved);
+  } catch {
+    return structuredClone(defaultData);
+  }
+}
+
+function persist() {
+  localStorage.setItem(storageKey, JSON.stringify(state, null, 2));
+}
+
+function render() {
+  renderFilters();
+  renderDashboard();
+  renderMeetings();
+  renderActions();
+  renderThemes();
+  persist();
+}
+
+function renderFilters() {
+  const currentTheme = els.themeFilter.value || "all";
+  const currentOwner = els.ownerFilter.value || "all";
+  const owners = [...new Set(state.actions.map((action) => action.owner).filter(Boolean))].sort();
+
+  els.themeFilter.innerHTML = optionHtml(["all", ...state.themes], currentTheme, "All themes");
+  els.ownerFilter.innerHTML = optionHtml(["all", ...owners], currentOwner, "All owners");
+  fillThemeSelects();
+  fillMeetingSelect();
+}
+
+function optionHtml(values, selected, allLabel) {
+  return values.map((value) => {
+    const label = value === "all" ? allLabel : value;
+    return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`;
+  }).join("");
+}
+
+function fillThemeSelects() {
+  const options = state.themes.map((theme) => `<option>${escapeHtml(theme)}</option>`).join("");
+  document.querySelector("#meetingTheme").innerHTML = options;
+  document.querySelector("#actionTheme").innerHTML = options;
+}
+
+function fillMeetingSelect() {
+  const options = [
+    '<option value="">No linked meeting</option>',
+    ...state.meetings.map((meeting) => `<option value="${meeting.id}">${escapeHtml(meeting.title)}</option>`)
+  ].join("");
+  document.querySelector("#actionMeeting").innerHTML = options;
+}
+
+function filteredActions() {
+  const theme = els.themeFilter.value || "all";
+  const owner = els.ownerFilter.value || "all";
+  const status = els.statusFilter.value || "all";
+  return state.actions.filter((action) => {
+    return (theme === "all" || action.theme === theme)
+      && (owner === "all" || action.owner === owner)
+      && (status === "all" || action.status === status);
+  });
+}
+
+function renderDashboard() {
+  const actions = filteredActions();
+  const open = actions.filter((action) => action.status !== "Done");
+  const overdue = open.filter((action) => action.dueDate < isoToday);
+  const completed = actions.filter((action) => action.status === "Done");
+  const completionRate = actions.length ? Math.round((completed.length / actions.length) * 100) : 0;
+
+  els.metrics.innerHTML = [
+    metric("Open actions", open.length),
+    metric("Overdue", overdue.length),
+    metric("Completion", `${completionRate}%`),
+    metric("Meetings", state.meetings.length)
+  ].join("");
+
+  const sorted = [...open].sort(sortByPriorityAndDue).slice(0, 8);
+  els.priorityCount.textContent = `${sorted.length} active`;
+  els.priorityList.innerHTML = sorted.length
+    ? sorted.map(actionCard).join("")
+    : emptyState("No active actions for the selected filters.");
+
+  renderTrend();
+}
+
+function metric(label, value) {
+  return `<div class="metric"><strong>${escapeHtml(String(value))}</strong><span>${escapeHtml(label)}</span></div>`;
+}
+
+function renderTrend() {
+  const weeks = Array.from({ length: 6 }, (_, index) => weekStart(addDays(isoToday, -7 * (5 - index))));
+  els.trendChart.innerHTML = weeks.map((week) => {
+    const end = addDays(week, 6);
+    const done = state.actions.filter((action) => action.completedAt >= week && action.completedAt <= end).length;
+    const open = state.actions.filter((action) => action.createdAt <= end && action.status !== "Done").length;
+    const max = Math.max(done + open, 1);
+    const doneHeight = Math.max(6, Math.round((done / max) * 210));
+    const openHeight = Math.max(6, Math.round((open / max) * 210));
+    return `
+      <div class="trend-bar" title="${done} done, ${open} open">
+        <div class="bar-stack" style="height:${Math.max(doneHeight, openHeight)}px">
+          <div class="bar-done" style="height:${doneHeight}px"></div>
+          <div class="bar-open" style="height:${openHeight}px"></div>
+        </div>
+        <div class="trend-label">${formatShortDate(week)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderMeetings() {
+  const meetings = [...state.meetings].sort((a, b) => b.date.localeCompare(a.date));
+  els.meetingList.innerHTML = meetings.length
+    ? meetings.map((meeting) => {
+      const linkedActions = state.actions.filter((action) => action.meetingId === meeting.id).length;
+      return `
+        <article class="meeting-card">
+          <div class="card-title">
+            <strong>${escapeHtml(meeting.title)}</strong>
+            <span class="pill priority-Medium">${escapeHtml(meeting.theme)}</span>
+          </div>
+          <div class="meta-row">
+            <span>${formatDate(meeting.date)}</span>
+            <span>${escapeHtml(meeting.participants || "No participants listed")}</span>
+            <span>${linkedActions} linked actions</span>
+          </div>
+          <p>${escapeHtml(meeting.mom)}</p>
+          <div class="row-actions">
+            <button class="small-button secondary-button" type="button" onclick="openMeetingDialog('${meeting.id}')">Edit</button>
+            <button class="small-button secondary-button" type="button" onclick="openActionDialog('', '${meeting.id}')">Add action</button>
+          </div>
+        </article>
+      `;
+    }).join("")
+    : emptyState("No meetings yet.");
+}
+
+function renderActions() {
+  const actions = filteredActions().sort(sortByPriorityAndDue);
+  els.actionTable.innerHTML = actions.length
+    ? actions.map((action) => `
+      <tr>
+        <td><strong>${escapeHtml(action.title)}</strong><div class="meta-row">${escapeHtml(action.notes || "")}</div></td>
+        <td>${escapeHtml(action.owner)}</td>
+        <td>${escapeHtml(action.theme)}</td>
+        <td><span class="pill priority-${action.priority}">${escapeHtml(action.priority)}</span></td>
+        <td>${formatDate(action.dueDate)}</td>
+        <td>
+          <select aria-label="Status for ${escapeHtml(action.title)}" onchange="updateStatus('${action.id}', this.value)">
+            ${["Open", "In progress", "Blocked", "Done"].map((status) => `<option ${status === action.status ? "selected" : ""}>${status}</option>`).join("")}
+          </select>
+        </td>
+        <td>
+          <div class="row-actions">
+            <button class="small-button secondary-button" type="button" onclick="openActionDialog('${action.id}')">Edit</button>
+          </div>
+        </td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="7">${emptyState("No actions for the selected filters.")}</td></tr>`;
+}
+
+function renderThemes() {
+  els.themeBoard.innerHTML = state.themes.map((theme) => {
+    const actions = state.actions.filter((action) => action.theme === theme);
+    const done = actions.filter((action) => action.status === "Done").length;
+    const overdue = actions.filter((action) => action.status !== "Done" && action.dueDate < isoToday).length;
+    return `
+      <article class="theme-card">
+        <strong>${escapeHtml(theme)}</strong>
+        <div class="meta-row">
+          <span>${actions.length} actions</span>
+          <span>${done} done</span>
+          <span>${overdue} overdue</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
+
+function actionCard(action) {
+  return `
+    <article class="action-card">
+      <div class="card-title">
+        <strong>${escapeHtml(action.title)}</strong>
+        <span class="pill priority-${action.priority}">${escapeHtml(action.priority)}</span>
+      </div>
+      <div class="meta-row">
+        <span>${escapeHtml(action.owner)}</span>
+        <span>${escapeHtml(action.theme)}</span>
+        <span>Due ${formatDate(action.dueDate)}</span>
+        <span class="pill status-${action.status.replaceAll(" ", "-")}">${escapeHtml(action.status)}</span>
+      </div>
+      <div class="row-actions">
+        <button class="small-button secondary-button" type="button" onclick="openActionDialog('${action.id}')">Edit</button>
+        <button class="small-button secondary-button" type="button" onclick="updateStatus('${action.id}', 'Done')">Done</button>
+      </div>
+    </article>
+  `;
+}
+
+function setView(viewName) {
+  Object.entries(els.views).forEach(([name, view]) => view.classList.toggle("active-view", name === viewName));
+  els.navTabs.forEach((tab) => tab.classList.toggle("active", tab.dataset.view === viewName));
+  els.viewTitle.textContent = viewName.charAt(0).toUpperCase() + viewName.slice(1);
+}
+
+function openMeetingDialog(id = "") {
+  const meeting = state.meetings.find((item) => item.id === id);
+  els.meetingDialogTitle.textContent = meeting ? "Edit meeting" : "New meeting";
+  document.querySelector("#meetingId").value = meeting?.id || "";
+  document.querySelector("#meetingTitle").value = meeting?.title || "";
+  document.querySelector("#meetingDate").value = meeting?.date || isoToday;
+  document.querySelector("#meetingTheme").value = meeting?.theme || state.themes[0];
+  document.querySelector("#meetingParticipants").value = meeting?.participants || "";
+  document.querySelector("#meetingMom").value = meeting?.mom || "";
+  els.meetingDialog.showModal();
+}
+
+function openActionDialog(id = "", meetingId = "") {
+  const action = state.actions.find((item) => item.id === id);
+  const meeting = state.meetings.find((item) => item.id === meetingId);
+  els.actionDialogTitle.textContent = action ? "Edit action" : "New action";
+  document.querySelector("#actionId").value = action?.id || "";
+  document.querySelector("#actionTitle").value = action?.title || "";
+  document.querySelector("#actionOwner").value = action?.owner || "";
+  document.querySelector("#actionTheme").value = action?.theme || meeting?.theme || state.themes[0];
+  document.querySelector("#actionPriority").value = action?.priority || "Medium";
+  document.querySelector("#actionStatus").value = action?.status || "Open";
+  document.querySelector("#actionDueDate").value = action?.dueDate || addDays(isoToday, 7);
+  document.querySelector("#actionMeeting").value = action?.meetingId || meetingId || "";
+  document.querySelector("#actionNotes").value = action?.notes || "";
+  els.actionDialog.showModal();
+}
+
+function saveMeeting(event) {
+  event.preventDefault();
+  const id = document.querySelector("#meetingId").value || crypto.randomUUID();
+  const meeting = {
+    id,
+    title: document.querySelector("#meetingTitle").value.trim(),
+    date: document.querySelector("#meetingDate").value,
+    theme: document.querySelector("#meetingTheme").value,
+    participants: document.querySelector("#meetingParticipants").value.trim(),
+    mom: document.querySelector("#meetingMom").value.trim()
+  };
+  state.meetings = upsert(state.meetings, meeting);
+  els.meetingDialog.close();
+  render();
+}
+
+function saveAction(event) {
+  event.preventDefault();
+  const id = document.querySelector("#actionId").value || crypto.randomUUID();
+  const existing = state.actions.find((action) => action.id === id);
+  const status = document.querySelector("#actionStatus").value;
+  const action = {
+    id,
+    title: document.querySelector("#actionTitle").value.trim(),
+    owner: document.querySelector("#actionOwner").value.trim(),
+    theme: document.querySelector("#actionTheme").value,
+    priority: document.querySelector("#actionPriority").value,
+    status,
+    dueDate: document.querySelector("#actionDueDate").value,
+    meetingId: document.querySelector("#actionMeeting").value,
+    notes: document.querySelector("#actionNotes").value.trim(),
+    createdAt: existing?.createdAt || isoToday,
+    completedAt: status === "Done" ? (existing?.completedAt || isoToday) : ""
+  };
+  state.actions = upsert(state.actions, action);
+  els.actionDialog.close();
+  render();
+}
+
+function saveTheme(event) {
+  event.preventDefault();
+  const name = document.querySelector("#themeName").value.trim();
+  if (name && !state.themes.includes(name)) {
+    state.themes.push(name);
+    state.themes.sort();
+  }
+  event.target.reset();
+  render();
+}
+
+function updateStatus(id, status) {
+  state.actions = state.actions.map((action) => {
+    if (action.id !== id) return action;
+    return {
+      ...action,
+      status,
+      completedAt: status === "Done" ? (action.completedAt || isoToday) : ""
+    };
+  });
+  render();
+}
+
+function upsert(items, item) {
+  const exists = items.some((existing) => existing.id === item.id);
+  return exists ? items.map((existing) => existing.id === item.id ? item : existing) : [...items, item];
+}
+
+function sortByPriorityAndDue(a, b) {
+  const priority = { Critical: 0, High: 1, Medium: 2, Low: 3 };
+  return (priority[a.priority] - priority[b.priority]) || a.dueDate.localeCompare(b.dueDate);
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `meeting-action-tracker-${isoToday}.json`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function importData(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const imported = JSON.parse(reader.result);
+      if (!Array.isArray(imported.themes) || !Array.isArray(imported.meetings) || !Array.isArray(imported.actions)) {
+        throw new Error("Invalid data");
+      }
+      state = imported;
+      render();
+    } catch {
+      alert("This file does not look like Action Tracker data.");
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearData() {
+  if (!confirm("Clear all locally stored meetings and actions?")) return;
+  state = { themes: ["Program Delivery"], meetings: [], actions: [] };
+  render();
+}
+
+function emptyState(text) {
+  return `<div class="empty-state">${escapeHtml(text)}</div>`;
+}
+
+function formatDate(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(`${value}T00:00:00`));
+}
+
+function formatShortDate(value) {
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(new Date(`${value}T00:00:00`));
+}
+
+function weekStart(value) {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() - date.getDay());
+  return date.toISOString().slice(0, 10);
+}
+
+function addDays(value, days) {
+  const date = new Date(`${value}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}

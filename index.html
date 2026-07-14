@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Meeting Action Tracker</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">AT</div>
+          <div>
+            <h1>Action Tracker</h1>
+            <p>Meetings, MoM, owners, priorities</p>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="Views">
+          <button class="nav-tab active" data-view="dashboard" type="button">Dashboard</button>
+          <button class="nav-tab" data-view="meetings" type="button">Meetings</button>
+          <button class="nav-tab" data-view="actions" type="button">Actions</button>
+          <button class="nav-tab" data-view="themes" type="button">Themes</button>
+        </nav>
+
+        <div class="sidebar-panel">
+          <label for="themeFilter">Theme</label>
+          <select id="themeFilter"></select>
+
+          <label for="ownerFilter">Owner</label>
+          <select id="ownerFilter"></select>
+
+          <label for="statusFilter">Status</label>
+          <select id="statusFilter">
+            <option value="all">All statuses</option>
+            <option value="Open">Open</option>
+            <option value="In progress">In progress</option>
+            <option value="Blocked">Blocked</option>
+            <option value="Done">Done</option>
+          </select>
+        </div>
+
+        <div class="sidebar-panel compact">
+          <button id="exportData" class="secondary-button" type="button">Export JSON</button>
+          <label class="file-button">
+            Import JSON
+            <input id="importData" type="file" accept="application/json">
+          </label>
+          <button id="clearData" class="danger-button" type="button">Clear local data</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Team operating rhythm</p>
+            <h2 id="viewTitle">Dashboard</h2>
+          </div>
+          <div class="topbar-actions">
+            <button id="newMeetingButton" type="button">New meeting</button>
+            <button id="newActionButton" type="button">New action</button>
+          </div>
+        </header>
+
+        <section id="dashboardView" class="view active-view">
+          <div class="metrics" id="metrics"></div>
+          <div class="two-column">
+            <section class="panel">
+              <div class="panel-heading">
+                <h3>Priority Queue</h3>
+                <span id="priorityCount"></span>
+              </div>
+              <div id="priorityList" class="action-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-heading">
+                <h3>Execution Trend</h3>
+                <span>Last 6 weeks</span>
+              </div>
+              <div id="trendChart" class="trend-chart"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="meetingsView" class="view">
+          <div class="section-heading">
+            <h3>Meeting Register</h3>
+            <button id="addMeetingInline" type="button">Add meeting</button>
+          </div>
+          <div id="meetingList" class="meeting-list"></div>
+        </section>
+
+        <section id="actionsView" class="view">
+          <div class="section-heading">
+            <h3>Action Items</h3>
+            <button id="addActionInline" type="button">Add action</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Owner</th>
+                  <th>Theme</th>
+                  <th>Priority</th>
+                  <th>Due</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="actionTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="themesView" class="view">
+          <div class="section-heading">
+            <h3>Themes</h3>
+            <form id="themeForm" class="inline-form">
+              <input id="themeName" type="text" placeholder="Add theme" required>
+              <button type="submit">Add</button>
+            </form>
+          </div>
+          <div id="themeBoard" class="theme-board"></div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="meetingDialog">
+      <form id="meetingForm" method="dialog" class="dialog-form">
+        <div class="dialog-head">
+          <h3 id="meetingDialogTitle">New meeting</h3>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog>&times;</button>
+        </div>
+        <input id="meetingId" type="hidden">
+        <label>Meeting title<input id="meetingTitle" type="text" required></label>
+        <div class="form-grid">
+          <label>Date<input id="meetingDate" type="date" required></label>
+          <label>Theme<select id="meetingTheme" required></select></label>
+        </div>
+        <label>Participants<input id="meetingParticipants" type="text" placeholder="Names separated by commas"></label>
+        <label>Minutes of meeting<textarea id="meetingMom" rows="6" required></textarea></label>
+        <div class="dialog-actions">
+          <button class="secondary-button" type="button" data-close-dialog>Cancel</button>
+          <button type="submit">Save meeting</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="actionDialog">
+      <form id="actionForm" method="dialog" class="dialog-form">
+        <div class="dialog-head">
+          <h3 id="actionDialogTitle">New action</h3>
+          <button class="icon-button" value="cancel" type="button" data-close-dialog>&times;</button>
+        </div>
+        <input id="actionId" type="hidden">
+        <label>Action item<input id="actionTitle" type="text" required></label>
+        <div class="form-grid">
+          <label>Owner<input id="actionOwner" type="text" required></label>
+          <label>Theme<select id="actionTheme" required></select></label>
+          <label>Priority
+            <select id="actionPriority">
+              <option>Critical</option>
+              <option>High</option>
+              <option>Medium</option>
+              <option>Low</option>
+            </select>
+          </label>
+          <label>Status
+            <select id="actionStatus">
+              <option>Open</option>
+              <option>In progress</option>
+              <option>Blocked</option>
+              <option>Done</option>
+            </select>
+          </label>
+          <label>Due date<input id="actionDueDate" type="date" required></label>
+          <label>Meeting<select id="actionMeeting"></select></label>
+        </div>
+        <label>Notes<textarea id="actionNotes" rows="4"></textarea></label>
+        <div class="dialog-actions">
+          <button class="secondary-button" type="button" data-close-dialog>Cancel</button>
+          <button type="submit">Save action</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
