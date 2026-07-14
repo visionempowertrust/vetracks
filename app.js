@@ -16,7 +16,7 @@ const defaultData = {
       title: "Weekly Leadership Review",
       date: isoToday,
       theme: "Program Delivery",
-      participants: "Meera, Operations, Program Leads",
+      participants: ["Operations", "Finance"],
       mom: "Reviewed delayed milestones, partner dependencies, and decision points for the current month."
     }
   ],
@@ -203,6 +203,7 @@ function fillOwnerSelect() {
   const options = state.owners.map((owner) => `<option>${escapeHtml(owner.name)}</option>`).join("");
   document.querySelector("#actionOwner").innerHTML = options;
   document.querySelector("#meetingActionOwner").innerHTML = options;
+  document.querySelector("#meetingParticipants").innerHTML = options;
 }
 
 function fillMeetingSelect() {
@@ -285,7 +286,7 @@ function renderMeetings() {
           </div>
           <div class="meta-row">
             <span>${formatDate(meeting.date)}</span>
-            <span>${escapeHtml(meeting.participants || "No participants listed")}</span>
+            <span>${escapeHtml(formatParticipants(meeting.participants))}</span>
             <span>${linkedActions} linked actions</span>
           </div>
           <p>${escapeHtml(meeting.mom)}</p>
@@ -428,7 +429,7 @@ function openMeetingDialog(id = "") {
   document.querySelector("#meetingTitle").value = meeting?.title || "";
   document.querySelector("#meetingDate").value = meeting?.date || isoToday;
   document.querySelector("#meetingTheme").value = meeting?.theme || state.themes[0];
-  document.querySelector("#meetingParticipants").value = meeting?.participants || "";
+  setMultiSelectValues(document.querySelector("#meetingParticipants"), normalizeParticipants(meeting?.participants));
   document.querySelector("#meetingMom").value = meeting?.mom || "";
   resetMeetingActionForm();
   renderMeetingActionDrafts();
@@ -468,7 +469,7 @@ function saveMeeting(event) {
     title: document.querySelector("#meetingTitle").value.trim(),
     date: document.querySelector("#meetingDate").value,
     theme: document.querySelector("#meetingTheme").value,
-    participants: document.querySelector("#meetingParticipants").value.trim(),
+    participants: getMultiSelectValues(document.querySelector("#meetingParticipants")),
     mom: document.querySelector("#meetingMom").value.trim()
   };
   state.meetings = upsert(state.meetings, meeting);
@@ -546,6 +547,30 @@ function resetMeetingActionForm() {
   document.querySelector("#cancelMeetingActionEdit").classList.add("hidden");
 }
 
+function normalizeParticipants(participants) {
+  if (Array.isArray(participants)) return participants.filter(Boolean);
+  if (typeof participants === "string") {
+    return participants.split(",").map((name) => name.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function formatParticipants(participants) {
+  const names = normalizeParticipants(participants);
+  return names.length ? names.join(", ") : "No participants listed";
+}
+
+function getMultiSelectValues(select) {
+  return [...select.selectedOptions].map((option) => option.value);
+}
+
+function setMultiSelectValues(select, values) {
+  const selected = new Set(values);
+  [...select.options].forEach((option) => {
+    option.selected = selected.has(option.value);
+  });
+}
+
 function saveAction(event) {
   event.preventDefault();
   const id = document.querySelector("#actionId").value || crypto.randomUUID();
@@ -588,6 +613,10 @@ function saveOwner(event) {
   state.owners = upsert(state.owners, owner).sort((a, b) => a.name.localeCompare(b.name));
   if (previousName && previousName !== owner.name) {
     state.actions = state.actions.map((action) => action.owner === previousName ? { ...action, owner: owner.name } : action);
+    state.meetings = state.meetings.map((meeting) => ({
+      ...meeting,
+      participants: normalizeParticipants(meeting.participants).map((participant) => participant === previousName ? owner.name : participant)
+    }));
   }
   resetOwnerForm();
   render();

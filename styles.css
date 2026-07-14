@@ -188,6 +188,14 @@ textarea {
   resize: vertical;
 }
 
+select[multiple] {
+  min-height: 96px;
+}
+
+select[multiple] option {
+  padding: 6px;
+}
+
 .file-button input {
   display: none;
 }
