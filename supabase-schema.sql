@@ -62,6 +62,43 @@ create table if not exists public.raahat_action_notes (
   created_at timestamptz not null default now()
 );
 
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'raahat_actions'
+      and column_name = 'owner_name'
+  ) then
+    execute '
+      insert into public.raahat_action_people (action_id, person_name)
+      select id, owner_name
+      from public.raahat_actions
+      where owner_name is not null
+      on conflict do nothing
+    ';
+    alter table public.raahat_actions drop column owner_name;
+  end if;
+
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'raahat_actions'
+      and column_name = 'theme_name'
+  ) then
+    execute '
+      insert into public.raahat_action_themes (action_id, theme_name)
+      select id, theme_name
+      from public.raahat_actions
+      where theme_name is not null
+      on conflict do nothing
+    ';
+    alter table public.raahat_actions drop column theme_name;
+  end if;
+end $$;
+
 alter table public.raahat_themes enable row level security;
 alter table public.raahat_people enable row level security;
 alter table public.raahat_meetings enable row level security;
