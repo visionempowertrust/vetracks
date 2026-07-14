@@ -246,6 +246,20 @@
           <label>Meeting<select id="actionMeeting"></select></label>
         </div>
         <label>Notes<textarea id="actionNotes" rows="4"></textarea></label>
+        <section class="embedded-editor">
+          <div class="embedded-heading">
+            <h4>Note history</h4>
+            <span>Dated updates</span>
+          </div>
+          <div id="actionNoteHistory" class="embedded-list"></div>
+          <div class="embedded-form">
+            <div class="form-grid">
+              <label>Added by<select id="actionNotePerson"></select></label>
+              <label>Date<input id="actionNoteDate" type="date"></label>
+            </div>
+            <label>New note<textarea id="actionNewNote" rows="3"></textarea></label>
+          </div>
+        </section>
         <div class="dialog-actions">
           <button class="secondary-button" type="button" data-close-dialog>Cancel</button>
           <button type="submit">Save action</button>

@@ -49,7 +49,8 @@ const defaultData = {
       createdAt: isoToday,
       completedAt: ""
     }
-  ]
+  ],
+  actionNotes: []
 };
 
 let state = structuredClone(defaultData);
@@ -144,7 +145,8 @@ function normalizeState(data) {
     themes: Array.isArray(data.themes) ? data.themes : structuredClone(defaultData.themes),
     owners: hasOwnerRecords ? data.owners : [],
     meetings: Array.isArray(data.meetings) ? data.meetings : [],
-    actions: Array.isArray(data.actions) ? data.actions : []
+    actions: Array.isArray(data.actions) ? data.actions : [],
+    actionNotes: Array.isArray(data.actionNotes) ? data.actionNotes : []
   };
   const participantOwners = normalized.meetings.flatMap((meeting) => normalizeParticipants(meeting.participants));
   const typedOwners = [
@@ -171,6 +173,14 @@ function normalizeState(data) {
     role: owner.role || "",
     email: owner.email || ""
   })).filter((owner) => owner.name).sort((a, b) => a.name.localeCompare(b.name));
+  normalized.actionNotes = normalized.actionNotes.map((note) => ({
+    id: note.id || crypto.randomUUID(),
+    actionId: note.actionId || note.action_id || "",
+    note: note.note || "",
+    person: note.person || note.person_name || "",
+    noteDate: note.noteDate || note.note_date || isoToday,
+    createdAt: note.createdAt || note.created_at || new Date().toISOString()
+  })).filter((note) => note.actionId && note.note);
   return normalized;
 }
 
@@ -194,16 +204,17 @@ function setSyncStatus(message, isError = false) {
 }
 
 async function loadState() {
-  const [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult] = await Promise.all([
+  const [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult, actionNotesResult] = await Promise.all([
     db.from("raahat_themes").select("*").order("name"),
     db.from("raahat_people").select("*").order("name"),
     db.from("raahat_meetings").select("*").order("date", { ascending: false }),
     db.from("raahat_meeting_participants").select("*"),
     db.from("raahat_actions").select("*").order("due_date", { ascending: true }),
     db.from("raahat_action_people").select("*"),
-    db.from("raahat_action_themes").select("*")
+    db.from("raahat_action_themes").select("*"),
+    db.from("raahat_action_notes").select("*").order("note_date", { ascending: false }).order("created_at", { ascending: false })
   ]);
-  [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult].forEach(throwIfSupabaseError);
+  [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult, actionPeopleResult, actionThemesResult, actionNotesResult].forEach(throwIfSupabaseError);
 
   const participantsByMeeting = participantsResult.data.reduce((map, row) => {
     if (!map[row.meeting_id]) map[row.meeting_id] = [];
@@ -249,6 +260,14 @@ async function loadState() {
       notes: action.notes || "",
       createdAt: action.created_at ? action.created_at.slice(0, 10) : isoToday,
       completedAt: action.completed_at || ""
+    })),
+    actionNotes: actionNotesResult.data.map((note) => ({
+      id: note.id,
+      actionId: note.action_id,
+      note: note.note,
+      person: note.person_name,
+      noteDate: note.note_date,
+      createdAt: note.created_at
     }))
   });
 }
@@ -263,6 +282,7 @@ async function seedDatabase(data) {
   await saveMeetingsToDatabase(data.meetings);
   await saveActionsToDatabase(data.actions);
   await saveParticipantsToDatabase(data.meetings);
+  await saveActionNotesToDatabase(data.actionNotes || []);
 }
 
 async function saveThemesToDatabase(themes) {
@@ -340,6 +360,28 @@ async function saveActionThemesToDatabase(actions) {
   throwIfSupabaseError(await db.from("raahat_action_themes").upsert(rows, { onConflict: "action_id,theme_name" }));
 }
 
+async function saveActionNoteToDatabase(note) {
+  if (!note.note.trim()) return;
+  throwIfSupabaseError(await db.from("raahat_action_notes").insert({
+    id: note.id,
+    action_id: note.actionId,
+    note: note.note.trim(),
+    person_name: note.person,
+    note_date: note.noteDate || isoToday
+  }));
+}
+
+async function saveActionNotesToDatabase(notes) {
+  if (!notes.length) return;
+  throwIfSupabaseError(await db.from("raahat_action_notes").insert(notes.map((note) => ({
+    id: note.id || crypto.randomUUID(),
+    action_id: note.actionId,
+    note: note.note,
+    person_name: note.person,
+    note_date: note.noteDate || isoToday
+  }))));
+}
+
 function actionToRow(action) {
   return {
     id: action.id,
@@ -403,6 +445,7 @@ function fillOwnerSelect() {
   document.querySelector("#actionOwner").innerHTML = options;
   document.querySelector("#meetingActionOwner").innerHTML = options;
   document.querySelector("#meetingParticipants").innerHTML = options;
+  document.querySelector("#actionNotePerson").innerHTML = options;
 }
 
 function fillMeetingSelect() {
@@ -567,6 +610,22 @@ function renderMeetingActionDrafts() {
     : emptyState("Add at least one action point before saving this meeting.");
 }
 
+function renderActionNoteHistory(actionId) {
+  const notes = state.actionNotes
+    .filter((note) => note.actionId === actionId)
+    .sort((a, b) => `${b.noteDate}${b.createdAt}`.localeCompare(`${a.noteDate}${a.createdAt}`));
+  document.querySelector("#actionNoteHistory").innerHTML = notes.length
+    ? notes.map((note) => `
+      <article class="embedded-item">
+        <div>
+          <strong>${escapeHtml(formatDate(note.noteDate))} · ${escapeHtml(note.person || "Unknown person")}</strong>
+          <p>${escapeHtml(note.note)}</p>
+        </div>
+      </article>
+    `).join("")
+    : emptyState("No note history yet.");
+}
+
 function renderThemes() {
   els.themeBoard.innerHTML = state.themes.map((theme) => {
     const actions = state.actions.filter((action) => normalizeThemes(action.themes || action.theme).includes(theme));
@@ -654,6 +713,10 @@ function openActionDialog(id = "", meetingId = "") {
   document.querySelector("#actionDueDate").value = action?.dueDate || addDays(isoToday, 7);
   document.querySelector("#actionMeeting").value = action?.meetingId || meetingId || "";
   document.querySelector("#actionNotes").value = action?.notes || "";
+  document.querySelector("#actionNotePerson").value = state.owners[0]?.name || "";
+  document.querySelector("#actionNoteDate").value = isoToday;
+  document.querySelector("#actionNewNote").value = "";
+  renderActionNoteHistory(action?.id || "");
   els.actionDialog.showModal();
 }
 
@@ -805,8 +868,15 @@ async function saveAction(event) {
   const status = document.querySelector("#actionStatus").value;
   const people = getMultiSelectValues(document.querySelector("#actionOwner"));
   const themes = getMultiSelectValues(document.querySelector("#actionTheme"));
+  const newNote = document.querySelector("#actionNewNote").value.trim();
+  const notePerson = document.querySelector("#actionNotePerson").value;
+  const noteDate = document.querySelector("#actionNoteDate").value || isoToday;
   if (!people.length || !themes.length) {
     alert("Select at least one person and one theme.");
+    return;
+  }
+  if (newNote && !notePerson) {
+    alert("Select the person adding the note.");
     return;
   }
   const action = {
@@ -824,6 +894,15 @@ async function saveAction(event) {
   };
   await runDatabaseChange(async () => {
     await saveActionsToDatabase([action]);
+    if (newNote) {
+      await saveActionNoteToDatabase({
+        id: crypto.randomUUID(),
+        actionId: id,
+        note: newNote,
+        person: notePerson,
+        noteDate
+      });
+    }
     els.actionDialog.close();
   }, "Database: action saved");
 }
@@ -971,6 +1050,7 @@ async function clearDatabaseTables() {
   throwIfSupabaseError(await db.from("raahat_meeting_participants").delete().neq("meeting_id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_action_people").delete().neq("action_id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_action_themes").delete().neq("action_id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_action_notes").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_meetings").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
   throwIfSupabaseError(await db.from("raahat_people").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
