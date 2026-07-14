@@ -106,10 +106,10 @@ button:hover,
   border: 1px solid var(--line);
   border-radius: 8px;
   height: auto;
-  max-height: 72px;
+  max-height: 18px;
   object-fit: contain;
-  padding: 6px;
-  width: min(100%, 240px);
+  padding: 2px;
+  width: min(25%, 60px);
 }
 
 .brand h1,
