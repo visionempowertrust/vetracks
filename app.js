@@ -633,7 +633,7 @@ function renderThemes() {
     const done = actions.filter((action) => action.status === "Done").length;
     const overdue = actions.filter((action) => action.status !== "Done" && action.dueDate < isoToday).length;
     return `
-      <article class="theme-card">
+      <article class="theme-card clickable-card" role="button" tabindex="0" onclick="showThemeActions('${escapeJs(theme)}')" onkeydown="handleThemeCardKey(event, '${escapeJs(theme)}')">
         <strong>${escapeHtml(theme)}</strong>
         <div class="meta-row">
           <span>${actions.length} actions</span>
@@ -643,6 +643,20 @@ function renderThemes() {
       </article>
     `;
   }).join("");
+}
+
+function showThemeActions(theme) {
+  els.themeFilter.value = theme;
+  els.statusFilter.value = "all";
+  renderActions();
+  renderDashboard();
+  setView("actions");
+}
+
+function handleThemeCardKey(event, theme) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  showThemeActions(theme);
 }
 
 function actionCard(action) {
@@ -1100,4 +1114,12 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function escapeJs(value) {
+  return String(value)
+    .replaceAll("\\", "\\\\")
+    .replaceAll("'", "\\'")
+    .replaceAll("\n", "\\n")
+    .replaceAll("\r", "");
 }

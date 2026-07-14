@@ -332,6 +332,17 @@ select[multiple] option {
   padding: 14px;
 }
 
+.clickable-card {
+  cursor: pointer;
+}
+
+.clickable-card:hover,
+.clickable-card:focus {
+  border-color: #9fd7d1;
+  box-shadow: 0 16px 42px rgba(15, 118, 110, 0.14);
+  outline: 0;
+}
+
 .action-card {
   display: grid;
   gap: 10px;
