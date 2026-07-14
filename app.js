@@ -559,6 +559,7 @@ function renderActions() {
         <td>
           <div class="row-actions">
             <button class="small-button secondary-button" type="button" onclick="openActionDialog('${action.id}')">Edit</button>
+            <button class="small-button danger-button" type="button" onclick="deleteAction('${action.id}')">Delete</button>
           </div>
         </td>
       </tr>
@@ -660,6 +661,7 @@ function actionCard(action) {
       <div class="row-actions">
         <button class="small-button secondary-button" type="button" onclick="openActionDialog('${action.id}')">Edit</button>
         <button class="small-button secondary-button" type="button" onclick="updateStatus('${action.id}', 'Done')">Done</button>
+        <button class="small-button danger-button" type="button" onclick="deleteAction('${action.id}')">Delete</button>
       </div>
     </article>
   `;
@@ -988,6 +990,15 @@ async function updateStatus(id, status) {
   await runDatabaseChange(async () => {
     throwIfSupabaseError(await db.from("raahat_actions").update({ status, completed_at: completedAt }).eq("id", id));
   }, "Database: status updated");
+}
+
+async function deleteAction(id) {
+  const action = state.actions.find((item) => item.id === id);
+  if (!action) return;
+  if (!confirm(`Delete action "${action.title}"? This will also delete its people, theme, and note history links.`)) return;
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_actions").delete().eq("id", id));
+  }, "Database: action deleted");
 }
 
 function upsert(items, item) {
