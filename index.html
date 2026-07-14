@@ -170,6 +170,43 @@
         </div>
         <label>Participants<input id="meetingParticipants" type="text" placeholder="Names separated by commas"></label>
         <label>Minutes of meeting<textarea id="meetingMom" rows="6" required></textarea></label>
+        <section class="embedded-editor">
+          <div class="embedded-heading">
+            <h4>Action points from this meeting</h4>
+            <span>Required for meeting records</span>
+          </div>
+          <div id="meetingActionList" class="embedded-list"></div>
+          <div class="embedded-form">
+            <input id="meetingActionId" type="hidden">
+            <label>Action item<input id="meetingActionTitle" type="text"></label>
+            <div class="form-grid">
+              <label>Owner<select id="meetingActionOwner"></select></label>
+              <label>Theme<select id="meetingActionTheme"></select></label>
+              <label>Priority
+                <select id="meetingActionPriority">
+                  <option>Critical</option>
+                  <option>High</option>
+                  <option selected>Medium</option>
+                  <option>Low</option>
+                </select>
+              </label>
+              <label>Status
+                <select id="meetingActionStatus">
+                  <option>Open</option>
+                  <option>In progress</option>
+                  <option>Blocked</option>
+                  <option>Done</option>
+                </select>
+              </label>
+              <label>Due date<input id="meetingActionDueDate" type="date"></label>
+              <label>Notes<input id="meetingActionNotes" type="text"></label>
+            </div>
+            <div class="embedded-actions">
+              <button id="saveMeetingAction" class="secondary-button" type="button">Add action point</button>
+              <button id="cancelMeetingActionEdit" class="secondary-button hidden" type="button">Cancel edit</button>
+            </div>
+          </div>
+        </section>
         <div class="dialog-actions">
           <button class="secondary-button" type="button" data-close-dialog>Cancel</button>
           <button type="submit">Save meeting</button>

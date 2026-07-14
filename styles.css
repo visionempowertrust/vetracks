@@ -503,6 +503,53 @@ dialog::backdrop {
   justify-content: flex-end;
 }
 
+.embedded-editor {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.embedded-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.embedded-heading h4 {
+  margin: 0;
+}
+
+.embedded-heading span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.embedded-list,
+.embedded-form {
+  display: grid;
+  gap: 10px;
+}
+
+.embedded-item {
+  align-items: center;
+  background: #f8fafb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px;
+}
+
+.embedded-actions {
+  display: flex;
+  gap: 10px;
+}
+
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
@@ -541,7 +588,14 @@ dialog::backdrop {
 
   .topbar-actions,
   .inline-form,
+  .embedded-actions,
   .dialog-actions {
+    flex-direction: column;
+  }
+
+  .embedded-item,
+  .embedded-heading {
+    align-items: stretch;
     flex-direction: column;
   }
 

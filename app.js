@@ -2,6 +2,7 @@ const storageKey = "meeting-action-tracker:v1";
 
 const today = new Date();
 const isoToday = today.toISOString().slice(0, 10);
+const sampleMeetingId = crypto.randomUUID();
 
 const defaultData = {
   themes: ["Program Delivery", "People & Staffing", "Finance", "Partnerships"],
@@ -11,7 +12,7 @@ const defaultData = {
   ],
   meetings: [
     {
-      id: crypto.randomUUID(),
+      id: sampleMeetingId,
       title: "Weekly Leadership Review",
       date: isoToday,
       theme: "Program Delivery",
@@ -28,7 +29,7 @@ const defaultData = {
       priority: "High",
       status: "In progress",
       dueDate: addDays(isoToday, 3),
-      meetingId: "",
+      meetingId: sampleMeetingId,
       notes: "Include dependencies and next review date.",
       createdAt: isoToday,
       completedAt: ""
@@ -50,6 +51,8 @@ const defaultData = {
 };
 
 let state = loadState();
+let meetingActionDrafts = [];
+let activeMeetingId = "";
 
 const els = {
   navTabs: document.querySelectorAll(".nav-tab"),
@@ -75,6 +78,7 @@ const els = {
   meetingDialog: document.querySelector("#meetingDialog"),
   meetingForm: document.querySelector("#meetingForm"),
   meetingDialogTitle: document.querySelector("#meetingDialogTitle"),
+  meetingActionList: document.querySelector("#meetingActionList"),
   actionDialog: document.querySelector("#actionDialog"),
   actionForm: document.querySelector("#actionForm"),
   actionDialogTitle: document.querySelector("#actionDialogTitle"),
@@ -97,6 +101,11 @@ document.querySelector("#newActionButton").addEventListener("click", () => openA
 document.querySelector("#addActionInline").addEventListener("click", () => openActionDialog());
 document.querySelector("#exportData").addEventListener("click", exportData);
 document.querySelector("#clearData").addEventListener("click", clearData);
+document.querySelector("#saveMeetingAction").addEventListener("click", saveMeetingActionDraft);
+document.querySelector("#cancelMeetingActionEdit").addEventListener("click", resetMeetingActionForm);
+document.querySelector("#meetingTheme").addEventListener("change", () => {
+  document.querySelector("#meetingActionTheme").value = document.querySelector("#meetingTheme").value;
+});
 
 ["change"].forEach((eventName) => {
   els.themeFilter.addEventListener(eventName, render);
@@ -187,11 +196,13 @@ function fillThemeSelects() {
   const options = state.themes.map((theme) => `<option>${escapeHtml(theme)}</option>`).join("");
   document.querySelector("#meetingTheme").innerHTML = options;
   document.querySelector("#actionTheme").innerHTML = options;
+  document.querySelector("#meetingActionTheme").innerHTML = options;
 }
 
 function fillOwnerSelect() {
   const options = state.owners.map((owner) => `<option>${escapeHtml(owner.name)}</option>`).join("");
   document.querySelector("#actionOwner").innerHTML = options;
+  document.querySelector("#meetingActionOwner").innerHTML = options;
 }
 
 function fillMeetingSelect() {
@@ -279,8 +290,7 @@ function renderMeetings() {
           </div>
           <p>${escapeHtml(meeting.mom)}</p>
           <div class="row-actions">
-            <button class="small-button secondary-button" type="button" onclick="openMeetingDialog('${meeting.id}')">Edit</button>
-            <button class="small-button secondary-button" type="button" onclick="openActionDialog('', '${meeting.id}')">Add action</button>
+            <button class="small-button secondary-button" type="button" onclick="openMeetingDialog('${meeting.id}')">Edit meeting</button>
           </div>
         </article>
       `;
@@ -335,6 +345,28 @@ function renderOwners() {
     : `<tr><td colspan="5">${emptyState("No owners yet.")}</td></tr>`;
 }
 
+function renderMeetingActionDrafts() {
+  els.meetingActionList.innerHTML = meetingActionDrafts.length
+    ? meetingActionDrafts.map((action) => `
+      <article class="embedded-item">
+        <div>
+          <strong>${escapeHtml(action.title)}</strong>
+          <div class="meta-row">
+            <span>${escapeHtml(action.owner)}</span>
+            <span>${escapeHtml(action.priority)}</span>
+            <span>${escapeHtml(action.status)}</span>
+            <span>Due ${formatDate(action.dueDate)}</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <button class="small-button secondary-button" type="button" onclick="editMeetingActionDraft('${action.id}')">Edit</button>
+          <button class="small-button danger-button" type="button" onclick="deleteMeetingActionDraft('${action.id}')">Delete</button>
+        </div>
+      </article>
+    `).join("")
+    : emptyState("Add at least one action point before saving this meeting.");
+}
+
 function renderThemes() {
   els.themeBoard.innerHTML = state.themes.map((theme) => {
     const actions = state.actions.filter((action) => action.theme === theme);
@@ -381,14 +413,25 @@ function setView(viewName) {
 }
 
 function openMeetingDialog(id = "") {
+  if (!state.owners.length) {
+    setView("owners");
+    document.querySelector("#ownerName").focus();
+    return;
+  }
   const meeting = state.meetings.find((item) => item.id === id);
+  activeMeetingId = meeting?.id || crypto.randomUUID();
+  meetingActionDrafts = state.actions
+    .filter((action) => action.meetingId === activeMeetingId)
+    .map((action) => ({ ...action }));
   els.meetingDialogTitle.textContent = meeting ? "Edit meeting" : "New meeting";
-  document.querySelector("#meetingId").value = meeting?.id || "";
+  document.querySelector("#meetingId").value = activeMeetingId;
   document.querySelector("#meetingTitle").value = meeting?.title || "";
   document.querySelector("#meetingDate").value = meeting?.date || isoToday;
   document.querySelector("#meetingTheme").value = meeting?.theme || state.themes[0];
   document.querySelector("#meetingParticipants").value = meeting?.participants || "";
   document.querySelector("#meetingMom").value = meeting?.mom || "";
+  resetMeetingActionForm();
+  renderMeetingActionDrafts();
   els.meetingDialog.showModal();
 }
 
@@ -415,7 +458,11 @@ function openActionDialog(id = "", meetingId = "") {
 
 function saveMeeting(event) {
   event.preventDefault();
-  const id = document.querySelector("#meetingId").value || crypto.randomUUID();
+  const id = document.querySelector("#meetingId").value || activeMeetingId || crypto.randomUUID();
+  if (!meetingActionDrafts.length) {
+    alert("Add at least one action point before saving the meeting.");
+    return;
+  }
   const meeting = {
     id,
     title: document.querySelector("#meetingTitle").value.trim(),
@@ -425,8 +472,78 @@ function saveMeeting(event) {
     mom: document.querySelector("#meetingMom").value.trim()
   };
   state.meetings = upsert(state.meetings, meeting);
+  state.actions = [
+    ...state.actions.filter((action) => action.meetingId !== id),
+    ...meetingActionDrafts.map((action) => ({ ...action, meetingId: id }))
+  ];
+  meetingActionDrafts = [];
+  activeMeetingId = "";
   els.meetingDialog.close();
   render();
+}
+
+function saveMeetingActionDraft() {
+  const title = document.querySelector("#meetingActionTitle").value.trim();
+  const owner = document.querySelector("#meetingActionOwner").value;
+  const dueDate = document.querySelector("#meetingActionDueDate").value;
+  if (!title || !owner || !dueDate) {
+    alert("Action item, owner, and due date are required.");
+    return;
+  }
+  const id = document.querySelector("#meetingActionId").value || crypto.randomUUID();
+  const existing = meetingActionDrafts.find((action) => action.id === id);
+  const status = document.querySelector("#meetingActionStatus").value;
+  const action = {
+    id,
+    title,
+    owner,
+    theme: document.querySelector("#meetingActionTheme").value,
+    priority: document.querySelector("#meetingActionPriority").value,
+    status,
+    dueDate,
+    meetingId: activeMeetingId,
+    notes: document.querySelector("#meetingActionNotes").value.trim(),
+    createdAt: existing?.createdAt || isoToday,
+    completedAt: status === "Done" ? (existing?.completedAt || isoToday) : ""
+  };
+  meetingActionDrafts = upsert(meetingActionDrafts, action).sort(sortByPriorityAndDue);
+  resetMeetingActionForm();
+  renderMeetingActionDrafts();
+}
+
+function editMeetingActionDraft(id) {
+  const action = meetingActionDrafts.find((item) => item.id === id);
+  if (!action) return;
+  document.querySelector("#meetingActionId").value = action.id;
+  document.querySelector("#meetingActionTitle").value = action.title;
+  document.querySelector("#meetingActionOwner").value = action.owner;
+  document.querySelector("#meetingActionTheme").value = action.theme;
+  document.querySelector("#meetingActionPriority").value = action.priority;
+  document.querySelector("#meetingActionStatus").value = action.status;
+  document.querySelector("#meetingActionDueDate").value = action.dueDate;
+  document.querySelector("#meetingActionNotes").value = action.notes || "";
+  document.querySelector("#saveMeetingAction").textContent = "Update action point";
+  document.querySelector("#cancelMeetingActionEdit").classList.remove("hidden");
+  document.querySelector("#meetingActionTitle").focus();
+}
+
+function deleteMeetingActionDraft(id) {
+  meetingActionDrafts = meetingActionDrafts.filter((action) => action.id !== id);
+  resetMeetingActionForm();
+  renderMeetingActionDrafts();
+}
+
+function resetMeetingActionForm() {
+  document.querySelector("#meetingActionId").value = "";
+  document.querySelector("#meetingActionTitle").value = "";
+  document.querySelector("#meetingActionOwner").value = state.owners[0]?.name || "";
+  document.querySelector("#meetingActionTheme").value = document.querySelector("#meetingTheme").value || state.themes[0];
+  document.querySelector("#meetingActionPriority").value = "Medium";
+  document.querySelector("#meetingActionStatus").value = "Open";
+  document.querySelector("#meetingActionDueDate").value = addDays(isoToday, 7);
+  document.querySelector("#meetingActionNotes").value = "";
+  document.querySelector("#saveMeetingAction").textContent = "Add action point";
+  document.querySelector("#cancelMeetingActionEdit").classList.add("hidden");
 }
 
 function saveAction(event) {
