@@ -101,16 +101,14 @@ button:hover,
   margin-bottom: 28px;
 }
 
-.brand-mark {
-  align-items: center;
-  background: var(--ink);
+.brand-logo {
+  background: var(--white);
+  border: 1px solid var(--line);
   border-radius: 8px;
-  color: white;
-  display: flex;
-  font-weight: 800;
-  height: 46px;
-  justify-content: center;
-  width: 46px;
+  height: 54px;
+  object-fit: contain;
+  padding: 5px;
+  width: 54px;
 }
 
 .brand h1,
@@ -123,7 +121,8 @@ button:hover,
 }
 
 .brand h1 {
-  font-size: 20px;
+  font-size: 22px;
+  line-height: 1.05;
 }
 
 .brand p,
@@ -131,6 +130,10 @@ button:hover,
 .panel-heading span {
   color: var(--muted);
   font-size: 13px;
+}
+
+.brand p {
+  line-height: 1.25;
 }
 
 .nav-tabs {
