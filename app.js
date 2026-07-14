@@ -1,4 +1,6 @@
-const storageKey = "meeting-action-tracker:v1";
+const SUPABASE_URL = "https://yhaloppwmvdyzssknkpc.supabase.co";
+const SUPABASE_KEY = "sb_publishable_eIEzksUAWbO6OeHK5eZ4iw_O6XsCchp";
+const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const today = new Date();
 const isoToday = today.toISOString().slice(0, 10);
@@ -50,7 +52,7 @@ const defaultData = {
   ]
 };
 
-let state = loadState();
+let state = structuredClone(defaultData);
 let meetingActionDrafts = [];
 let activeMeetingId = "";
 
@@ -75,6 +77,7 @@ const els = {
   themeFilter: document.querySelector("#themeFilter"),
   ownerFilter: document.querySelector("#ownerFilter"),
   statusFilter: document.querySelector("#statusFilter"),
+  syncStatus: document.querySelector("#syncStatus"),
   meetingDialog: document.querySelector("#meetingDialog"),
   meetingForm: document.querySelector("#meetingForm"),
   meetingDialogTitle: document.querySelector("#meetingDialogTitle"),
@@ -120,15 +123,18 @@ els.themeForm.addEventListener("submit", saveTheme);
 els.importData.addEventListener("change", importData);
 document.querySelector("#cancelOwnerEdit").addEventListener("click", resetOwnerForm);
 
-render();
+initApp();
 
-function loadState() {
-  const saved = localStorage.getItem(storageKey);
-  if (!saved) return structuredClone(defaultData);
+async function initApp() {
+  setSyncStatus("Database: connecting");
   try {
-    return normalizeState(JSON.parse(saved));
-  } catch {
-    return structuredClone(defaultData);
+    state = await loadState();
+    render();
+    setSyncStatus("Database: synced");
+  } catch (error) {
+    console.error(error);
+    render();
+    setSyncStatus(`Database: ${error.message}`, true);
   }
 }
 
@@ -140,7 +146,11 @@ function normalizeState(data) {
     meetings: Array.isArray(data.meetings) ? data.meetings : [],
     actions: Array.isArray(data.actions) ? data.actions : []
   };
-  const typedOwners = normalized.actions.map((action) => action.owner).filter(Boolean);
+  const participantOwners = normalized.meetings.flatMap((meeting) => normalizeParticipants(meeting.participants));
+  const typedOwners = [
+    ...normalized.actions.map((action) => action.owner).filter(Boolean),
+    ...participantOwners
+  ];
   const ownerNames = new Set(normalized.owners.map((owner) => owner.name).filter(Boolean));
   if (!hasOwnerRecords) {
     typedOwners.forEach((name) => {
@@ -160,7 +170,7 @@ function normalizeState(data) {
 }
 
 function persist() {
-  localStorage.setItem(storageKey, JSON.stringify(state, null, 2));
+  // Supabase is the source of truth. This function remains to keep render flow simple.
 }
 
 function render() {
@@ -171,6 +181,157 @@ function render() {
   renderOwners();
   renderThemes();
   persist();
+}
+
+function setSyncStatus(message, isError = false) {
+  els.syncStatus.textContent = message;
+  els.syncStatus.classList.toggle("error", isError);
+}
+
+async function loadState() {
+  const [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult] = await Promise.all([
+    db.from("raahat_themes").select("*").order("name"),
+    db.from("raahat_owners").select("*").order("name"),
+    db.from("raahat_meetings").select("*").order("date", { ascending: false }),
+    db.from("raahat_meeting_participants").select("*"),
+    db.from("raahat_actions").select("*").order("due_date", { ascending: true })
+  ]);
+  [themesResult, ownersResult, meetingsResult, participantsResult, actionsResult].forEach(throwIfSupabaseError);
+
+  const participantsByMeeting = participantsResult.data.reduce((map, row) => {
+    if (!map[row.meeting_id]) map[row.meeting_id] = [];
+    map[row.meeting_id].push(row.owner_name);
+    return map;
+  }, {});
+
+  return normalizeState({
+    themes: themesResult.data.map((theme) => theme.name),
+    owners: ownersResult.data.map((owner) => ({
+      id: owner.id,
+      name: owner.name,
+      role: owner.role || "",
+      email: owner.email || ""
+    })),
+    meetings: meetingsResult.data.map((meeting) => ({
+      id: meeting.id,
+      title: meeting.title,
+      date: meeting.date,
+      theme: meeting.theme_name,
+      participants: participantsByMeeting[meeting.id] || [],
+      mom: meeting.mom
+    })),
+    actions: actionsResult.data.map((action) => ({
+      id: action.id,
+      title: action.title,
+      owner: action.owner_name,
+      theme: action.theme_name,
+      priority: action.priority,
+      status: action.status,
+      dueDate: action.due_date,
+      meetingId: action.meeting_id || "",
+      notes: action.notes || "",
+      createdAt: action.created_at ? action.created_at.slice(0, 10) : isoToday,
+      completedAt: action.completed_at || ""
+    }))
+  });
+}
+
+function throwIfSupabaseError(result) {
+  if (result.error) throw result.error;
+}
+
+async function seedDatabase(data) {
+  await saveThemesToDatabase(data.themes);
+  await saveOwnersToDatabase(data.owners);
+  await saveMeetingsToDatabase(data.meetings);
+  await saveActionsToDatabase(data.actions);
+  await saveParticipantsToDatabase(data.meetings);
+}
+
+async function saveThemesToDatabase(themes) {
+  if (!themes.length) return;
+  throwIfSupabaseError(await db.from("raahat_themes").upsert(
+    themes.map((name) => ({ name })),
+    { onConflict: "name" }
+  ));
+}
+
+async function saveOwnersToDatabase(owners) {
+  if (!owners.length) return;
+  throwIfSupabaseError(await db.from("raahat_owners").upsert(
+    owners.map((owner) => ({
+      id: owner.id,
+      name: owner.name,
+      role: owner.role || null,
+      email: owner.email || null
+    })),
+    { onConflict: "id" }
+  ));
+}
+
+async function saveMeetingsToDatabase(meetings) {
+  if (!meetings.length) return;
+  throwIfSupabaseError(await db.from("raahat_meetings").upsert(
+    meetings.map((meeting) => ({
+      id: meeting.id,
+      title: meeting.title,
+      date: meeting.date,
+      theme_name: meeting.theme,
+      mom: meeting.mom
+    })),
+    { onConflict: "id" }
+  ));
+}
+
+async function saveActionsToDatabase(actions) {
+  if (!actions.length) return;
+  throwIfSupabaseError(await db.from("raahat_actions").upsert(
+    actions.map(actionToRow),
+    { onConflict: "id" }
+  ));
+}
+
+async function saveParticipantsToDatabase(meetings) {
+  const rows = meetings.flatMap((meeting) => normalizeParticipants(meeting.participants).map((ownerName) => ({
+    meeting_id: meeting.id,
+    owner_name: ownerName
+  })));
+  if (!rows.length) return;
+  throwIfSupabaseError(await db.from("raahat_meeting_participants").upsert(rows, { onConflict: "meeting_id,owner_name" }));
+}
+
+function actionToRow(action) {
+  return {
+    id: action.id,
+    title: action.title,
+    owner_name: action.owner,
+    theme_name: action.theme,
+    priority: action.priority,
+    status: action.status,
+    due_date: action.dueDate,
+    meeting_id: action.meetingId || null,
+    notes: action.notes || null,
+    created_at: action.createdAt || isoToday,
+    completed_at: action.completedAt || null
+  };
+}
+
+async function syncFromDatabase(message = "Database: synced") {
+  state = await loadState();
+  render();
+  setSyncStatus(message);
+}
+
+async function runDatabaseChange(work, successMessage) {
+  setSyncStatus("Database: saving");
+  try {
+    await work();
+    await syncFromDatabase(successMessage);
+  } catch (error) {
+    console.error(error);
+    setSyncStatus(`Database: ${error.message}`, true);
+    alert(`Database save failed: ${error.message}`);
+  }
 }
 
 function renderFilters() {
@@ -457,7 +618,7 @@ function openActionDialog(id = "", meetingId = "") {
   els.actionDialog.showModal();
 }
 
-function saveMeeting(event) {
+async function saveMeeting(event) {
   event.preventDefault();
   const id = document.querySelector("#meetingId").value || activeMeetingId || crypto.randomUUID();
   if (!meetingActionDrafts.length) {
@@ -472,15 +633,23 @@ function saveMeeting(event) {
     participants: getMultiSelectValues(document.querySelector("#meetingParticipants")),
     mom: document.querySelector("#meetingMom").value.trim()
   };
-  state.meetings = upsert(state.meetings, meeting);
-  state.actions = [
-    ...state.actions.filter((action) => action.meetingId !== id),
-    ...meetingActionDrafts.map((action) => ({ ...action, meetingId: id }))
-  ];
-  meetingActionDrafts = [];
-  activeMeetingId = "";
-  els.meetingDialog.close();
-  render();
+  const linkedActions = meetingActionDrafts.map((action) => ({ ...action, meetingId: id }));
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_meetings").upsert({
+      id: meeting.id,
+      title: meeting.title,
+      date: meeting.date,
+      theme_name: meeting.theme,
+      mom: meeting.mom
+    }, { onConflict: "id" }));
+    throwIfSupabaseError(await db.from("raahat_meeting_participants").delete().eq("meeting_id", id));
+    await saveParticipantsToDatabase([meeting]);
+    throwIfSupabaseError(await db.from("raahat_actions").delete().eq("meeting_id", id));
+    await saveActionsToDatabase(linkedActions);
+    meetingActionDrafts = [];
+    activeMeetingId = "";
+    els.meetingDialog.close();
+  }, "Database: meeting saved");
 }
 
 function saveMeetingActionDraft() {
@@ -571,7 +740,7 @@ function setMultiSelectValues(select, values) {
   });
 }
 
-function saveAction(event) {
+async function saveAction(event) {
   event.preventDefault();
   const id = document.querySelector("#actionId").value || crypto.randomUUID();
   const existing = state.actions.find((action) => action.id === id);
@@ -589,12 +758,13 @@ function saveAction(event) {
     createdAt: existing?.createdAt || isoToday,
     completedAt: status === "Done" ? (existing?.completedAt || isoToday) : ""
   };
-  state.actions = upsert(state.actions, action);
-  els.actionDialog.close();
-  render();
+  await runDatabaseChange(async () => {
+    await saveActionsToDatabase([action]);
+    els.actionDialog.close();
+  }, "Database: action saved");
 }
 
-function saveOwner(event) {
+async function saveOwner(event) {
   event.preventDefault();
   const id = document.querySelector("#ownerId").value || crypto.randomUUID();
   const existing = state.owners.find((owner) => owner.id === id);
@@ -610,16 +780,19 @@ function saveOwner(event) {
     alert("An owner with this name already exists.");
     return;
   }
-  state.owners = upsert(state.owners, owner).sort((a, b) => a.name.localeCompare(b.name));
-  if (previousName && previousName !== owner.name) {
-    state.actions = state.actions.map((action) => action.owner === previousName ? { ...action, owner: owner.name } : action);
-    state.meetings = state.meetings.map((meeting) => ({
-      ...meeting,
-      participants: normalizeParticipants(meeting.participants).map((participant) => participant === previousName ? owner.name : participant)
-    }));
-  }
-  resetOwnerForm();
-  render();
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_owners").upsert({
+      id: owner.id,
+      name: owner.name,
+      role: owner.role || null,
+      email: owner.email || null
+    }, { onConflict: "id" }));
+    if (previousName && previousName !== owner.name) {
+      throwIfSupabaseError(await db.from("raahat_actions").update({ owner_name: owner.name }).eq("owner_name", previousName));
+      throwIfSupabaseError(await db.from("raahat_meeting_participants").update({ owner_name: owner.name }).eq("owner_name", previousName));
+    }
+    resetOwnerForm();
+  }, "Database: owner saved");
 }
 
 function editOwner(id) {
@@ -634,7 +807,7 @@ function editOwner(id) {
   document.querySelector("#ownerName").focus();
 }
 
-function deleteOwner(id) {
+async function deleteOwner(id) {
   const owner = state.owners.find((item) => item.id === id);
   if (!owner) return;
   const openActions = state.actions.filter((action) => action.owner === owner.name && action.status !== "Done").length;
@@ -643,9 +816,10 @@ function deleteOwner(id) {
     return;
   }
   if (!confirm(`Delete owner "${owner.name}"? Completed action history will keep the owner name.`)) return;
-  state.owners = state.owners.filter((item) => item.id !== id);
-  resetOwnerForm();
-  render();
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_owners").delete().eq("id", id));
+    resetOwnerForm();
+  }, "Database: owner deleted");
 }
 
 function resetOwnerForm() {
@@ -655,27 +829,22 @@ function resetOwnerForm() {
   document.querySelector("#cancelOwnerEdit").classList.add("hidden");
 }
 
-function saveTheme(event) {
+async function saveTheme(event) {
   event.preventDefault();
   const name = document.querySelector("#themeName").value.trim();
-  if (name && !state.themes.includes(name)) {
-    state.themes.push(name);
-    state.themes.sort();
-  }
-  event.target.reset();
-  render();
+  if (!name) return;
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_themes").upsert({ name }, { onConflict: "name" }));
+    event.target.reset();
+  }, "Database: theme saved");
 }
 
-function updateStatus(id, status) {
-  state.actions = state.actions.map((action) => {
-    if (action.id !== id) return action;
-    return {
-      ...action,
-      status,
-      completedAt: status === "Done" ? (action.completedAt || isoToday) : ""
-    };
-  });
-  render();
+async function updateStatus(id, status) {
+  const action = state.actions.find((item) => item.id === id);
+  const completedAt = status === "Done" ? (action?.completedAt || isoToday) : null;
+  await runDatabaseChange(async () => {
+    throwIfSupabaseError(await db.from("raahat_actions").update({ status, completed_at: completedAt }).eq("id", id));
+  }, "Database: status updated");
 }
 
 function upsert(items, item) {
@@ -701,25 +870,45 @@ function importData(event) {
   const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
-  reader.onload = () => {
+  reader.onload = async () => {
     try {
       const imported = JSON.parse(reader.result);
       if (!Array.isArray(imported.themes) || !Array.isArray(imported.meetings) || !Array.isArray(imported.actions)) {
         throw new Error("Invalid data");
       }
-      state = normalizeState(imported);
-      render();
-    } catch {
-      alert("This file does not look like Action Tracker data.");
+      const normalized = normalizeState(imported);
+      await runDatabaseChange(async () => {
+        await clearDatabaseTables();
+        await seedDatabase(normalized);
+      }, "Database: imported");
+    } catch (error) {
+      alert(`Import failed: ${error.message}`);
     }
   };
   reader.readAsText(file);
 }
 
-function clearData() {
-  if (!confirm("Clear all locally stored meetings and actions?")) return;
-  state = { themes: ["Program Delivery"], owners: [], meetings: [], actions: [] };
-  render();
+async function clearData() {
+  if (!confirm("Clear all database records for meetings, actions, owners, and themes?")) return;
+  setSyncStatus("Database: clearing");
+  try {
+    await clearDatabaseTables();
+    state = await loadState();
+    render();
+    setSyncStatus("Database: cleared");
+  } catch (error) {
+    console.error(error);
+    setSyncStatus(`Database: ${error.message}`, true);
+    alert(`Clear failed: ${error.message}`);
+  }
+}
+
+async function clearDatabaseTables() {
+  throwIfSupabaseError(await db.from("raahat_meeting_participants").delete().neq("meeting_id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_actions").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_meetings").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_owners").delete().neq("id", "00000000-0000-0000-0000-000000000000"));
+  throwIfSupabaseError(await db.from("raahat_themes").delete().neq("name", ""));
 }
 
 function emptyState(text) {

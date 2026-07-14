@@ -169,6 +169,22 @@ button:hover,
   gap: 12px;
 }
 
+.sync-status {
+  background: #edf7f6;
+  border: 1px solid #cce8e5;
+  border-radius: 6px;
+  color: var(--teal-dark);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px;
+}
+
+.sync-status.error {
+  background: #fff0ee;
+  border-color: #ffd2cc;
+  color: var(--red);
+}
+
 label {
   color: var(--muted);
   display: grid;
